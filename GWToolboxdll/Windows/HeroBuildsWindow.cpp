@@ -735,6 +735,7 @@ bool HeroBuildsWindow::CodeOnHero::Process() {
     case Add: // Need to add hero to party
         GW::PartyMgr::AddHero(heroid);
         stage = Load;
+        [[fallthrough]];
     case Load: // Waiting for hero to be added to party
         {
             const GW::HeroPartyMember* hero = GetPartyHeroByID(heroid, &party_hero_index);
@@ -753,6 +754,7 @@ bool HeroBuildsWindow::CodeOnHero::Process() {
                 GW::CtoS::SendPacket(0xC, GAME_CMSG_HERO_BEHAVIOR, hero->agent_id, behavior);
         }
         stage = Finished;
+        [[fallthrough]];
     case Finished: // Success, hero added and build loaded.
         return true;
     }

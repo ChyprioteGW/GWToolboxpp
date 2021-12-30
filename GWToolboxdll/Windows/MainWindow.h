@@ -14,7 +14,7 @@ public:
         return instance;
     }
 
-    const char* Name() const override { return "Toolbox"; }
+    const char* Name() const override { return "My Toolbox"; }
 
     const char* SettingsName() const override  { return "Toolbox Settings"; }
 
@@ -41,11 +41,13 @@ private:
     }
     std::vector<std::pair<float, ToolboxUIElement*>> modules_to_draw{};
     const std::unordered_map<std::string,float> module_weightings {
+        {"Travel", 0.45f},
+        {"Completion", 0.46f},
+        {"Reroll", 0.47f},
         {"Pcons",0.5f},
         {"Hotkeys",0.52f},
         {"Builds",0.54f},
         {"Hero Builds",0.56f},
-        {"Travel",0.58f},
         {"Dialogs",0.6f},
         {"Info",0.62f},
         {"Materials",0.64f},
@@ -57,7 +59,7 @@ private:
         {"Friend List",0.76f},
         {"Damage",0.78f},
         {"Minimap",0.8f},
-        {"Settings",0.82f}
+        {"Settings",1.2f}
     };
 protected:
     const float SettingsWeighting() override { return 1.1f; };
