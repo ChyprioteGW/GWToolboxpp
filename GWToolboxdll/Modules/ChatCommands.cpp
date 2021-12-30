@@ -84,7 +84,7 @@ namespace {
         }
         tan_angle *= 180.0f / pi;
         return tan_angle;
-    };
+    }
 
     static void TargetVipers() {
         // target best vipers target (closest)
@@ -120,18 +120,18 @@ namespace {
         // target best ebon escape target
         const GW::AgentArray agents = GW::Agents::GetAgentArray();
         if (!agents.valid()) return;
-        const GW::Agent* const me = GW::Agents::GetPlayer();
+        const GW::Agent* me = GW::Agents::GetPlayer();
         if (me == nullptr) return;
 
         const float facing_angle = (me->rotation_angle * 180.0f / F_PI);
         const float wanted_angle = facing_angle > 0.0f ? facing_angle - 180.0f : facing_angle + 180.0f;
-        const float max_angle_diff = 22.5f; // Acceptable angle for ebon escape
+        const float max_angle_diff = 22.5f; // Acceptable angle for Ebon escape
         const float max_distance = GW::Constants::SqrRange::Spellcast;
         float distance = 0.0f;
 
         size_t closest = static_cast<size_t>(-1);
         for (size_t i = 0, size = agents.size(); i < size; ++i) {
-            const GW::AgentLiving* const agent = static_cast<GW::AgentLiving*>(agents[i]);
+            const GW::AgentLiving* agent = static_cast<GW::AgentLiving*>(agents[i]);
             if (agent == nullptr || agent == me
                 || !agent->GetIsLivingType() || agent->GetIsDead()
                 || agent->allegiance == 0x3)
@@ -155,7 +155,7 @@ namespace {
         return wcscmp(str, L"nearest") == 0 || wcscmp(str, L"closest") == 0;
     }
 
-    static std::map<std::string, ChatCommands::PendingTransmo> npc_transmos;
+    static std::map<std::string, ChatCommands::PendingTransmo> npc_transmo;
 } // namespace
 
 void ChatCommands::TransmoAgent(DWORD agent_id, PendingTransmo& transmo)
@@ -239,7 +239,7 @@ void ChatCommands::TransmoAgent(DWORD agent_id, PendingTransmo& transmo)
 
 bool ChatCommands::GetNPCInfoByName(const std::string name, PendingTransmo& transmo)
 {
-    for (const auto& npc_transmo : npc_transmos) {
+    for (const auto& npc_transmo : npc_transmo) {
         const size_t found_len = npc_transmo.first.find(name);
         if (found_len == std::string::npos)
             continue;
@@ -349,7 +349,7 @@ void ChatCommands::Initialize() {
     const DWORD def_scale = 0x64000000;
     // Available Transmo NPCs
     // @Enhancement: Ability to target an NPC in-game and add it to this list via a GUI
-    npc_transmos = {
+    npc_transmo = {
         {"charr", {163, def_scale, 0x0004c409, 0, 98820}},
         {"reindeer", {5, def_scale, 277573, 277576, 32780}},
         {"gwenpre", {244, def_scale, 116377, 116759, 98820}},
@@ -420,6 +420,7 @@ void ChatCommands::Initialize() {
     });
     GW::Chat::CreateCommand(L"hero", ChatCommands::CmdHeroBehaviour);
     GW::Chat::CreateCommand(L"morale", ChatCommands::CmdMorale);
+    GW::Chat::CreateCommand(L"invlosing", ChatCommands::CmdInviteHenchTeam);
 }
 
 bool ChatCommands::WndProc(UINT Message, WPARAM wParam, LPARAM lParam) {
@@ -1202,10 +1203,10 @@ void ChatCommands::CmdSCWiki(const wchar_t *message, int argc, LPWSTR *argv) {
     UNREFERENCED_PARAMETER(message);
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (argc == 1) {
-        ShellExecuteW(NULL, L"open", L"http://wiki.fbgmguild.com/Main_Page", NULL, NULL, SW_SHOWNORMAL);
+        ShellExecuteW(NULL, L"open", L"https://wiki.fbgmguild.com/Main_Page", NULL, NULL, SW_SHOWNORMAL);
     } else {
         // the buffer is large enough, because you can type only 120 characters at once in the chat.
-        wchar_t link[256] = L"http://wiki.fbgmguild.com/index.php?search=";
+        wchar_t link[256] = L"https://wiki.fbgmguild.com/index.php?search=";
         int i;
         for (i = 1; i < argc - 1; i++) {
             wcscat_s(link, argv[i]);
@@ -1762,4 +1763,23 @@ void ChatCommands::CmdHeroBehaviour(const wchar_t*, int argc, LPWSTR* argv)
             GW::CtoS::SendPacket(0xC, GAME_CMSG_HERO_BEHAVIOR, hero.agent_id, behaviour);
         }
     }
+}
+
+void ChatCommands::CmdInviteHenchTeam(const wchar_t* message, int argc, LPWSTR* argv)
+{
+    UNREFERENCED_PARAMETER(message);
+    UNREFERENCED_PARAMETER(argc);
+    UNREFERENCED_PARAMETER(argv);
+    GW::AreaInfo* m = GW::Map::GetCurrentMapInfo();
+    if (
+        !IsMapReady()
+        || m->type != GW::RegionType::RegionType_GuildHall
+        || !GW::PartyMgr::GetPlayerIsLeader()
+    )
+        return;
+    
+    GW::PartyMgr::AddHenchman(8);
+    GW::PartyMgr::AddHenchman(13);
+    GW::PartyMgr::AddHenchman(14);
+    GW::PartyMgr::AddHenchman(15);
 }
