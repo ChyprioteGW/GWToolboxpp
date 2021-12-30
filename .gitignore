@@ -50,3 +50,5 @@ GWToolbox.aps
 *.sublime-workspace*
 .vs/
 build/
+cmake-build-debug/
+.idea/
