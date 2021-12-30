@@ -92,7 +92,7 @@ namespace {
         }
         tan_angle *= 180.0f / pi;
         return tan_angle;
-    };
+    }
 
     void TargetVipers() {
         // target best vipers target (closest)
@@ -132,7 +132,7 @@ namespace {
 
         const float facing_angle = (me->rotation_angle * 180.0f / F_PI);
         const float wanted_angle = facing_angle > 0.0f ? facing_angle - 180.0f : facing_angle + 180.0f;
-        const float max_angle_diff = 22.5f; // Acceptable angle for ebon escape
+        const float max_angle_diff = 22.5f; // Acceptable angle for Ebon escape
         const float max_distance = GW::Constants::SqrRange::Spellcast;
         float distance = 0.0f;
 
@@ -654,6 +654,7 @@ void ChatCommands::Initialize() {
     GW::Chat::CreateCommand(L"hom", CmdHom);
     GW::Chat::CreateCommand(L"fps", CmdFps);
     GW::Chat::CreateCommand(L"pref", CmdPref);
+    GW::Chat::CreateCommand(L"invlosing", ChatCommands::CmdInviteHenchTeam);
 
     // Experimental chat commands
 #if _DEBUG
@@ -1527,10 +1528,10 @@ void ChatCommands::CmdSCWiki(const wchar_t *message, int argc, LPWSTR *argv) {
     if (!SUCCEEDED(res))
         return;
     if (argc == 1) {
-        ShellExecuteW(NULL, L"open", L"http://wiki.fbgmguild.com/Main_Page", NULL, NULL, SW_SHOWNORMAL);
+        ShellExecuteW(NULL, L"open", L"https://wiki.fbgmguild.com/Main_Page", NULL, NULL, SW_SHOWNORMAL);
     } else {
         // the buffer is large enough, because you can type only 120 characters at once in the chat.
-        wchar_t link[256] = L"http://wiki.fbgmguild.com/index.php?search=";
+        wchar_t link[256] = L"https://wiki.fbgmguild.com/index.php?search=";
         int i;
         for (i = 1; i < argc - 1; i++) {
             wcscat_s(link, argv[i]);
@@ -2282,4 +2283,23 @@ void ChatCommands::CmdMute(const wchar_t*, int , LPWSTR*) {
         SetMuted_Func(!(*is_muted));
         PostMuted_Func(0);
     }
+}
+
+void ChatCommands::CmdInviteHenchTeam(const wchar_t* message, int argc, LPWSTR* argv)
+{
+    UNREFERENCED_PARAMETER(message);
+    UNREFERENCED_PARAMETER(argc);
+    UNREFERENCED_PARAMETER(argv);
+    GW::AreaInfo* m = GW::Map::GetCurrentMapInfo();
+    if (
+        !IsMapReady()
+        || m->type != GW::RegionType::RegionType_GuildHall
+        || !GW::PartyMgr::GetPlayerIsLeader()
+    )
+        return;
+    
+    GW::PartyMgr::AddHenchman(8);
+    GW::PartyMgr::AddHenchman(13);
+    GW::PartyMgr::AddHenchman(14);
+    GW::PartyMgr::AddHenchman(15);
 }

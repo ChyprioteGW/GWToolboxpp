@@ -101,6 +101,7 @@ private:
     static void CmdHom(const wchar_t*, int argc, LPWSTR* argv);
     static void CmdWithdraw(const wchar_t*, int argc, LPWSTR* argv);
 
+    static void CmdInviteHenchTeam(const wchar_t* message, int argc, LPWSTR* argv);
     static void TransmoAgent(DWORD agent_id, PendingTransmo& transmo);
     static bool GetNPCInfoByName(const std::string name, PendingTransmo &transmo);
     static bool GetNPCInfoByName(const std::wstring name, PendingTransmo &transmo);
