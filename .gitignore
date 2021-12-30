@@ -66,3 +66,6 @@ build/
 
 # VSCode stuff
 .vscode/
+
+cmake-build-debug/
+.idea/
