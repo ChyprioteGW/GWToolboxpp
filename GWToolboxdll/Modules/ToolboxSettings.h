@@ -64,6 +64,8 @@ private:
     bool use_notepad = true;
     bool use_vanquish = true;
     bool use_alcohol = true;
+    bool use_treasure_hunter = true;
+    bool use_heroes_ascent = true;
     bool use_world_map = true;
     bool use_effect_monitor = true;
     bool use_objectivetimer = true;
