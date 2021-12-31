@@ -79,6 +79,8 @@
 #include <Widgets/SkillbarWidget.h>
 #include <Widgets/WorldMapWidget.h>
 #include <Widgets/EffectsMonitorWidget.h>
+#include <Widgets/TreasureHunterWidget.h>
+#include <Widgets/HeroesAscentWidget.h>
 #include "ToolboxSettings.h"
 
 //#define _FUN
@@ -159,6 +161,8 @@ void ToolboxSettings::LoadModules(CSimpleIni* ini) {
     if (use_clock) optional_modules.push_back(&ClockWidget::Instance());
     if (use_vanquish) optional_modules.push_back(&VanquishWidget::Instance());
     if (use_alcohol) optional_modules.push_back(&AlcoholWidget::Instance());
+    if (use_treasure_hunter) optional_modules.push_back(&TreasureHunterWidget::Instance());
+    if (use_heroes_ascent) optional_modules.push_back(&HeroesAscentWidget::Instance());
     if (use_world_map) optional_modules.push_back(&WorldMapWidget::Instance());
     if (use_effect_monitor) optional_modules.push_back(&EffectsMonitorWidget::Instance());
 #if _DEBUG
@@ -221,6 +225,8 @@ void ToolboxSettings::DrawSettingInternal() {
         {"Pcons",&use_pcons},
         {"Reroll",&use_reroll_window},
         {"Timer",&use_timer},
+        {"Treasure Hunter",&use_treasure_hunter},
+        {"Heroes Ascent",&use_heroes_ascent},
         {"Trade",&use_trade},
         {"Travel",&use_travel},
         {"Teamspeak",&use_teamspeak},
@@ -306,6 +312,8 @@ void ToolboxSettings::LoadSettings(CSimpleIni* ini) {
     use_notepad = ini->GetBoolValue(Name(), VAR_NAME(use_notepad), use_notepad);
     use_vanquish = ini->GetBoolValue(Name(), VAR_NAME(use_vanquish), use_vanquish);
     use_alcohol = ini->GetBoolValue(Name(), VAR_NAME(use_alcohol), use_alcohol);
+    use_treasure_hunter = ini->GetBoolValue(Name(), VAR_NAME(use_treasure_hunter), use_treasure_hunter);
+    use_heroes_ascent = ini->GetBoolValue(Name(), VAR_NAME(use_heroes_ascent), use_heroes_ascent);
     use_trade = ini->GetBoolValue(Name(), VAR_NAME(use_trade), use_trade);
     use_objectivetimer = ini->GetBoolValue(Name(), VAR_NAME(use_objectivetimer), use_objectivetimer);
     save_location_data = ini->GetBoolValue(Name(), VAR_NAME(save_location_data), save_location_data);
@@ -355,6 +363,8 @@ void ToolboxSettings::SaveSettings(CSimpleIni* ini) {
     ini->SetBoolValue(Name(), VAR_NAME(use_notepad), use_notepad);
     ini->SetBoolValue(Name(), VAR_NAME(use_vanquish), use_vanquish);
     ini->SetBoolValue(Name(), VAR_NAME(use_alcohol), use_alcohol);
+    ini->SetBoolValue(Name(), VAR_NAME(use_treasure_hunter), use_treasure_hunter);
+    ini->SetBoolValue(Name(), VAR_NAME(use_heroes_ascent), use_heroes_ascent);
     ini->SetBoolValue(Name(), VAR_NAME(use_trade), use_trade);
     ini->SetBoolValue(Name(), VAR_NAME(use_objectivetimer), use_objectivetimer);
     ini->SetBoolValue(Name(), VAR_NAME(use_factionleaderboard), use_factionleaderboard);

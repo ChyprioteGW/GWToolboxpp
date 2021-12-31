@@ -155,7 +155,7 @@ namespace {
         return wcscmp(str, L"nearest") == 0 || wcscmp(str, L"closest") == 0;
     }
 
-    static std::map<std::string, ChatCommands::PendingTransmo> npc_transmo;
+    static std::map<std::string, ChatCommands::PendingTransmo> npc_transmos;
 } // namespace
 
 void ChatCommands::TransmoAgent(DWORD agent_id, PendingTransmo& transmo)
@@ -239,7 +239,7 @@ void ChatCommands::TransmoAgent(DWORD agent_id, PendingTransmo& transmo)
 
 bool ChatCommands::GetNPCInfoByName(const std::string name, PendingTransmo& transmo)
 {
-    for (const auto& npc_transmo : npc_transmo) {
+    for (const auto& npc_transmo : npc_transmos) {
         const size_t found_len = npc_transmo.first.find(name);
         if (found_len == std::string::npos)
             continue;
