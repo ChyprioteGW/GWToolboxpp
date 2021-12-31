@@ -78,6 +78,8 @@
 #include <Widgets/WorldMapWidget.h>
 #include <Widgets/EffectsMonitorWidget.h>
 #include <Widgets/LatencyWidget.h>
+#include <Widgets/TreasureHunterWidget.h>
+#include <Widgets/HeroesAscentWidget.h>
 #include "ToolboxSettings.h"
 
 namespace {
@@ -192,8 +194,35 @@ void ToolboxSettings::LoadModules(ToolboxIni* ini) {
     GWToolbox::ToggleModule(DoorMonitorWindow::Instance());
     GWToolbox::ToggleModule(SkillListingWindow::Instance());
 #endif
+<<<<<<< HEAD
 #ifdef USE_PLUGINS
     if (use_plugins) GWToolbox::ToggleModule(PluginModule::Instance());
+=======
+    std::sort(
+        optional_modules.begin() + static_cast<int>(SettingsWindow::Instance().sep_windows),
+        optional_modules.end(),
+        [](const ToolboxModule* lhs, const ToolboxModule* rhs) {
+            return std::string(lhs->SettingsName()).compare(rhs->SettingsName()) < 0;
+        });
+
+    SettingsWindow::Instance().sep_widgets = optional_modules.size();
+    if (use_timer) optional_modules.push_back(&TimerWidget::Instance());
+    if (use_health) optional_modules.push_back(&HealthWidget::Instance());
+    if (use_skillbar) optional_modules.push_back(&SkillbarWidget::Instance());
+    if (use_distance) optional_modules.push_back(&DistanceWidget::Instance());
+    if (use_minimap) optional_modules.push_back(&Minimap::Instance());
+    if (use_damage) optional_modules.push_back(&PartyDamage::Instance());
+    if (use_bonds) optional_modules.push_back(&BondsWidget::Instance());
+    if (use_clock) optional_modules.push_back(&ClockWidget::Instance());
+    if (use_vanquish) optional_modules.push_back(&VanquishWidget::Instance());
+    if (use_alcohol) optional_modules.push_back(&AlcoholWidget::Instance());
+    if (use_treasure_hunter) optional_modules.push_back(&TreasureHunterWidget::Instance());
+    if (use_heroes_ascent) optional_modules.push_back(&HeroesAscentWidget::Instance());
+    if (use_world_map) optional_modules.push_back(&WorldMapWidget::Instance());
+    if (use_effect_monitor) optional_modules.push_back(&EffectsMonitorWidget::Instance());
+#if _DEBUG
+    
+>>>>>>> f664afeb (add treasure hunter and ha widgets)
 #endif
     for (const auto& m : optional_modules) {
         GWToolbox::ToggleModule(*m.toolbox_module, m.enabled);
@@ -224,6 +253,50 @@ void ToolboxSettings::DrawSettingInternal() {
     ImGui::PushID("global_enable");
     ImGui::Text("Enable the following features:");
     ImGui::TextDisabled("Unticking will completely disable a feature from initializing and running. Requires Toolbox restart.");
+<<<<<<< HEAD
+=======
+    static std::vector<std::pair<const char*, bool*>> features{
+        {"Alcohol",&use_alcohol},
+        {"Bonds",&use_bonds},
+        {"Builds",&use_builds},
+        {"Clock",&use_clock},
+        {"Completion",&use_completion_window},
+        {"Daily Quests",&use_daily_quests},
+        {"Damage",&use_damage},
+        {"Dialogs",&use_dialogs},
+        {"Discord",&use_discord},
+        {"Distance",&use_distance},
+        {"Effect Monitor",&use_effect_monitor},
+        {"Health",&use_health},
+        {"Hotkeys",&use_hotkeys},
+        {"Friend List",&use_friendlist},
+        {"Hero Builds",&use_herobuilds},
+        {"Info",&use_info},
+        {"Materials",&use_materials},
+        {"Minimap",&use_minimap},
+        {"Notepad",&use_notepad},
+        {"Objective Timer",&use_objectivetimer},
+        {"Obfuscator",&use_obfuscator},
+        {"Party Window",&use_partywindowmodule},
+        {"Pcons",&use_pcons},
+        {"Reroll",&use_reroll_window},
+        {"Timer",&use_timer},
+        {"Treasure Hunter",&use_treasure_hunter},
+        {"Heroes Ascent",&use_heroes_ascent},
+        {"Trade",&use_trade},
+        {"Travel",&use_travel},
+        {"Teamspeak",&use_teamspeak},
+        {"Twitch",&use_twitch},
+        {"Observer",&use_observer},
+        {"Observer Player Window",&use_observer_player_window},
+        {"Observer Target Window",&use_observer_target_window},
+        {"Observer Party Window",&use_observer_party_window},
+        {"Observer Export Window",&use_observer_export_window},
+        {"Party Statistics",&use_party_statistics},
+        {"Vanquish counter",&use_vanquish},
+        {"World Map",&use_world_map},
+    };
+>>>>>>> f664afeb (add treasure hunter and ha widgets)
     ImGui::Columns(static_cast<int>(cols), "global_enable_cols", false);
 
     const auto optional_modules_total = optional_modules.size() + optional_widgets.size() + optional_windows.size();
@@ -276,6 +349,7 @@ void ToolboxSettings::LoadSettings(ToolboxIni* ini) {
     inifile = ini; // Keep this to load module info
 
     move_all = false;
+<<<<<<< HEAD
     
     for (auto& m : optional_modules) {
         m.enabled = ini->GetBoolValue(modules_ini_section, m.name, m.enabled);
@@ -286,11 +360,60 @@ void ToolboxSettings::LoadSettings(ToolboxIni* ini) {
     for (auto& m : optional_widgets) {
         m.enabled = ini->GetBoolValue(modules_ini_section, m.name, m.enabled);
     }
+=======
+    use_pcons = ini->GetBoolValue(Name(), VAR_NAME(use_pcons), use_pcons);
+    use_hotkeys = ini->GetBoolValue(Name(), VAR_NAME(use_hotkeys), use_hotkeys);
+    use_builds = ini->GetBoolValue(Name(), VAR_NAME(use_builds), use_builds);
+    use_herobuilds = ini->GetBoolValue(Name(), VAR_NAME(use_herobuilds), use_herobuilds);
+    use_travel = ini->GetBoolValue(Name(), VAR_NAME(use_travel), use_travel);
+    use_dialogs = ini->GetBoolValue(Name(), VAR_NAME(use_dialogs), use_dialogs);
+    use_info = ini->GetBoolValue(Name(), VAR_NAME(use_info), use_info);
+    use_materials = ini->GetBoolValue(Name(), VAR_NAME(use_materials), use_materials);
+    use_timer = ini->GetBoolValue(Name(), VAR_NAME(use_timer), use_timer);
+    use_health = ini->GetBoolValue(Name(), VAR_NAME(use_health), use_health);
+    use_distance = ini->GetBoolValue(Name(), VAR_NAME(use_distance), use_distance);
+    use_minimap = ini->GetBoolValue(Name(), VAR_NAME(use_minimap), use_minimap);
+    use_damage = ini->GetBoolValue(Name(), VAR_NAME(use_damage), use_damage);
+    use_bonds = ini->GetBoolValue(Name(), VAR_NAME(use_bonds), use_bonds);
+    use_clock = ini->GetBoolValue(Name(), VAR_NAME(use_clock), use_clock);
+    use_notepad = ini->GetBoolValue(Name(), VAR_NAME(use_notepad), use_notepad);
+    use_vanquish = ini->GetBoolValue(Name(), VAR_NAME(use_vanquish), use_vanquish);
+    use_alcohol = ini->GetBoolValue(Name(), VAR_NAME(use_alcohol), use_alcohol);
+    use_treasure_hunter = ini->GetBoolValue(Name(), VAR_NAME(use_treasure_hunter), use_treasure_hunter);
+    use_heroes_ascent = ini->GetBoolValue(Name(), VAR_NAME(use_heroes_ascent), use_heroes_ascent);
+    use_trade = ini->GetBoolValue(Name(), VAR_NAME(use_trade), use_trade);
+    use_objectivetimer = ini->GetBoolValue(Name(), VAR_NAME(use_objectivetimer), use_objectivetimer);
+    save_location_data = ini->GetBoolValue(Name(), VAR_NAME(save_location_data), save_location_data);
+    use_gamesettings = ini->GetBoolValue(Name(), VAR_NAME(use_gamesettings), use_gamesettings);
+    use_updater = ini->GetBoolValue(Name(), VAR_NAME(use_updater), use_updater);
+    use_chatfilter = ini->GetBoolValue(Name(), VAR_NAME(use_chatfilter), use_chatfilter);
+    use_chatcommand = ini->GetBoolValue(Name(), VAR_NAME(use_chatcommand), use_chatcommand);
+    use_discord = ini->GetBoolValue(Name(), VAR_NAME(use_discord), use_discord);
+    use_factionleaderboard = ini->GetBoolValue(Name(), VAR_NAME(use_factionleaderboard), use_factionleaderboard);
+    use_teamspeak = ini->GetBoolValue(Name(), VAR_NAME(use_teamspeak), use_teamspeak);
+    use_twitch = ini->GetBoolValue(Name(), VAR_NAME(use_twitch), use_twitch);
+    use_observer = ini->GetBoolValue(Name(), VAR_NAME(use_observer), use_observer);
+    use_observer_player_window = ini->GetBoolValue(Name(), VAR_NAME(use_observer_player_window), use_observer_player_window);
+    use_observer_target_window = ini->GetBoolValue(Name(), VAR_NAME(use_observer_target_window), use_observer_target_window);
+    use_observer_party_window = ini->GetBoolValue(Name(), VAR_NAME(use_observer_party_window), use_observer_party_window);
+    use_observer_export_window = ini->GetBoolValue(Name(), VAR_NAME(use_observer_export_window), use_observer_export_window);
+    use_partywindowmodule = ini->GetBoolValue(Name(), VAR_NAME(use_partywindowmodule), use_partywindowmodule);
+    use_friendlist = ini->GetBoolValue(Name(), VAR_NAME(use_friendlist), use_friendlist);
+    use_serverinfo = ini->GetBoolValue(Name(), VAR_NAME(use_serverinfo), use_serverinfo);
+    use_daily_quests = ini->GetBoolValue(Name(), VAR_NAME(use_daily_quests), use_daily_quests);
+    use_obfuscator = ini->GetBoolValue(Name(), VAR_NAME(use_obfuscator), use_obfuscator);
+    use_completion_window = ini->GetBoolValue(Name(), VAR_NAME(use_completion_window), use_completion_window);
+    use_world_map = ini->GetBoolValue(Name(), VAR_NAME(use_world_map), use_world_map);
+    use_effect_monitor = ini->GetBoolValue(Name(), VAR_NAME(use_effect_monitor), use_effect_monitor);
+    use_reroll_window = ini->GetBoolValue(Name(), VAR_NAME(use_reroll_window), use_reroll_window);
+    use_party_statistics = ini->GetBoolValue(Name(), VAR_NAME(use_party_statistics), use_party_statistics);
+>>>>>>> f664afeb (add treasure hunter and ha widgets)
 }
 
 void ToolboxSettings::SaveSettings(ToolboxIni* ini) {
     ToolboxModule::SaveSettings(ini);
     if (location_file.is_open()) location_file.close();
+<<<<<<< HEAD
 
     for (auto& m : optional_modules) {
         ini->SetBoolValue(modules_ini_section, m.name, m.enabled);
@@ -301,6 +424,54 @@ void ToolboxSettings::SaveSettings(ToolboxIni* ini) {
     for (auto& m : optional_widgets) {
         ini->SetBoolValue(modules_ini_section, m.name, m.enabled);
     }
+=======
+    ini->SetBoolValue(Name(), VAR_NAME(use_pcons), use_pcons);
+    ini->SetBoolValue(Name(), VAR_NAME(use_hotkeys), use_hotkeys);
+    ini->SetBoolValue(Name(), VAR_NAME(use_builds), use_builds);
+    ini->SetBoolValue(Name(), VAR_NAME(use_herobuilds), use_herobuilds);
+    ini->SetBoolValue(Name(), VAR_NAME(use_travel), use_travel);
+    ini->SetBoolValue(Name(), VAR_NAME(use_dialogs), use_dialogs);
+    ini->SetBoolValue(Name(), VAR_NAME(use_info), use_info);
+    ini->SetBoolValue(Name(), VAR_NAME(use_materials), use_materials);
+    ini->SetBoolValue(Name(), VAR_NAME(use_timer), use_timer);
+    ini->SetBoolValue(Name(), VAR_NAME(use_health), use_health);
+    ini->SetBoolValue(Name(), VAR_NAME(use_distance), use_distance);
+    ini->SetBoolValue(Name(), VAR_NAME(use_minimap), use_minimap);
+    ini->SetBoolValue(Name(), VAR_NAME(use_damage), use_damage);
+    ini->SetBoolValue(Name(), VAR_NAME(use_bonds), use_bonds);
+    ini->SetBoolValue(Name(), VAR_NAME(use_clock), use_clock);
+    ini->SetBoolValue(Name(), VAR_NAME(use_notepad), use_notepad);
+    ini->SetBoolValue(Name(), VAR_NAME(use_vanquish), use_vanquish);
+    ini->SetBoolValue(Name(), VAR_NAME(use_alcohol), use_alcohol);
+    ini->SetBoolValue(Name(), VAR_NAME(use_treasure_hunter), use_treasure_hunter);
+    ini->SetBoolValue(Name(), VAR_NAME(use_heroes_ascent), use_heroes_ascent);
+    ini->SetBoolValue(Name(), VAR_NAME(use_trade), use_trade);
+    ini->SetBoolValue(Name(), VAR_NAME(use_objectivetimer), use_objectivetimer);
+    ini->SetBoolValue(Name(), VAR_NAME(use_factionleaderboard), use_factionleaderboard);
+    ini->SetBoolValue(Name(), VAR_NAME(use_discord), use_discord);
+    ini->SetBoolValue(Name(), VAR_NAME(use_teamspeak), use_teamspeak);
+    ini->SetBoolValue(Name(), VAR_NAME(use_twitch), use_twitch);
+    ini->SetBoolValue(Name(), VAR_NAME(use_observer), use_observer);
+    ini->SetBoolValue(Name(), VAR_NAME(use_observer_player_window), use_observer_player_window);
+    ini->SetBoolValue(Name(), VAR_NAME(use_observer_target_window), use_observer_target_window);
+    ini->SetBoolValue(Name(), VAR_NAME(use_observer_party_window), use_observer_party_window);
+    ini->SetBoolValue(Name(), VAR_NAME(use_observer_export_window), use_observer_export_window);
+    ini->SetBoolValue(Name(), VAR_NAME(use_partywindowmodule), use_partywindowmodule);
+    ini->SetBoolValue(Name(), VAR_NAME(use_friendlist), use_friendlist);
+    ini->SetBoolValue(Name(), VAR_NAME(use_serverinfo), use_serverinfo);
+    ini->SetBoolValue(Name(), VAR_NAME(save_location_data), save_location_data);
+    ini->SetBoolValue(Name(), VAR_NAME(use_gamesettings), use_gamesettings);
+    ini->SetBoolValue(Name(), VAR_NAME(use_updater), use_updater);
+    ini->SetBoolValue(Name(), VAR_NAME(use_chatfilter), use_chatfilter);
+    ini->SetBoolValue(Name(), VAR_NAME(use_chatcommand), use_chatcommand);
+    ini->SetBoolValue(Name(), VAR_NAME(use_daily_quests), use_daily_quests);
+    ini->SetBoolValue(Name(), VAR_NAME(use_obfuscator), use_obfuscator);
+    ini->SetBoolValue(Name(), VAR_NAME(use_completion_window), use_completion_window);
+    ini->SetBoolValue(Name(), VAR_NAME(use_world_map), use_world_map);
+    ini->SetBoolValue(Name(), VAR_NAME(use_effect_monitor), use_effect_monitor);
+    ini->SetBoolValue(Name(), VAR_NAME(use_reroll_window), use_reroll_window);
+    ini->SetBoolValue(Name(), VAR_NAME(use_party_statistics), use_party_statistics);
+>>>>>>> f664afeb (add treasure hunter and ha widgets)
 }
 
 void ToolboxSettings::Draw(IDirect3DDevice9*) {
