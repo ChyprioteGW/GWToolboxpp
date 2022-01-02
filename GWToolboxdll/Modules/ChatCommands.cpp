@@ -349,11 +349,11 @@ void ChatCommands::Initialize() {
     const DWORD def_scale = 0x64000000;
     // Available Transmo NPCs
     // @Enhancement: Ability to target an NPC in-game and add it to this list via a GUI
-    npc_transmo = {
-        {"charr", {163, def_scale, 0x0004c409, 0, 98820}},
-        {"reindeer", {5, def_scale, 277573, 277576, 32780}},
-        {"gwenpre", {244, def_scale, 116377, 116759, 98820}},
-        {"gwenchan", {245, def_scale, 116377, 283392, 98820}},
+    npc_transmos = {
+        {"charr", {163, def_scale, 0x0004c409, 0, 98820}}, 
+        {"reindeer", {5, def_scale, 277573, 277576, 32780}}, 
+        {"gwenpre", {244, def_scale, 116377, 116759, 98820}}, 
+        {"gwenchan", {245, def_scale, 116377, 283392, 98820}}, 
         {"eye", {0x1f4, def_scale, 0x9d07, 0, 0}},
         {"zhu", {298, def_scale, 170283, 170481, 98820}},
         {"kuunavang", {309, def_scale, 157438, 157527, 98820}},
@@ -420,7 +420,7 @@ void ChatCommands::Initialize() {
     });
     GW::Chat::CreateCommand(L"hero", ChatCommands::CmdHeroBehaviour);
     GW::Chat::CreateCommand(L"morale", ChatCommands::CmdMorale);
-    GW::Chat::CreateCommand(L"invlosing", ChatCommands::CmdInviteHenchTeam);
+    GW::Chat::CreateCommand(L"form", ChatCommands::CmdInviteHenchTeam);
 }
 
 bool ChatCommands::WndProc(UINT Message, WPARAM wParam, LPARAM lParam) {
@@ -1770,14 +1770,26 @@ void ChatCommands::CmdInviteHenchTeam(const wchar_t* message, int argc, LPWSTR* 
     UNREFERENCED_PARAMETER(message);
     UNREFERENCED_PARAMETER(argc);
     UNREFERENCED_PARAMETER(argv);
-    GW::AreaInfo* m = GW::Map::GetCurrentMapInfo();
+    const GW::AreaInfo* map = GW::Map::GetCurrentMapInfo();
+    const GW::Agent* me = GW::Agents::GetPlayer();
+    if (me == nullptr || !me) return;
+
     if (
         !IsMapReady()
-        || m->type != GW::RegionType::RegionType_GuildHall
+        || map->type != GW::RegionType::RegionType_GuildHall
         || !GW::PartyMgr::GetPlayerIsLeader()
     )
         return;
     
+    GW::PlayerArray players = GW::Agents::GetPlayerArray();
+
+    for (const GW::Player player: players) {
+        if (player.agent_id == me->agent_id) continue;
+        wchar_t msg[64];
+        swprintf(msg, _countof(msg), L"invite %s", player.name);
+        GW::Chat::SendChat('/', msg);
+    }
+
     GW::PartyMgr::AddHenchman(8);
     GW::PartyMgr::AddHenchman(13);
     GW::PartyMgr::AddHenchman(14);

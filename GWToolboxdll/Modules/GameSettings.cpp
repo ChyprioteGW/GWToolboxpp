@@ -1942,17 +1942,18 @@ void GameSettings::OnPartyInviteReceived(GW::HookStatus* status, GW::Packet::Sto
         return;
     if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost || !GetPlayerIsLeader())
         return;
-    if (GW::PartyMgr::GetIsPlayerTicked()) {
-        PartyInfo* other_party = GetPartyInfo(packet->target_party_id);
-        PartyInfo* my_party = GetPartyInfo();
-        if (instance->auto_accept_invites && other_party && my_party && my_party->GetPartySize() <= other_party->GetPartySize()) {
-            // Auto accept if I'm joining a bigger party
-            GW::CtoS::SendPacket(0x8, GAME_CMSG_PARTY_ACCEPT_INVITE, packet->target_party_id);
-        }
-        if (instance->auto_accept_join_requests && other_party && my_party && my_party->GetPartySize() > other_party->GetPartySize()) {
-            // Auto accept join requests if I'm the bigger party
-            GW::CtoS::SendPacket(0x8, GAME_CMSG_PARTY_ACCEPT_INVITE, packet->target_party_id);
-        }
+
+    PartyInfo* other_party = GetPartyInfo(packet->target_party_id);
+    PartyInfo* my_party = GetPartyInfo();
+    if (!other_party || !my_party)
+        return;
+    if (my_party->GetPartySize() <= other_party->GetPartySize()) {
+        // Auto accept if I'm joining a bigger party
+        GW::CtoS::SendPacket(0x8, GAME_CMSG_PARTY_ACCEPT_INVITE, packet->target_party_id);
+    }
+    if (my_party->GetPartySize() > other_party->GetPartySize()) {
+        // Auto accept join requests if I'm the bigger party
+        GW::CtoS::SendPacket(0x8, GAME_CMSG_PARTY_ACCEPT_INVITE, packet->target_party_id);
     }
     if (instance->flash_window_on_party_invite)
         FlashWindow();
