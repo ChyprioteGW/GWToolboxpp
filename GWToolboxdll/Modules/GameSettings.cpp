@@ -1937,7 +1937,7 @@ void GameSettings::OnStartWhisper(GW::HookStatus* status, wchar_t* _name) {
 // Auto accept invitations, flash window on received party invite
 void GameSettings::OnPartyInviteReceived(GW::HookStatus* status, GW::Packet::StoC::PartyInviteReceived_Create* packet) {
     UNREFERENCED_PARAMETER(status);
-    GameSettings *instance = &Instance();
+    UNREFERENCED_PARAMETER(packet);
     if (status->blocked)
         return;
     if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost || !GetPlayerIsLeader())
@@ -1955,27 +1955,16 @@ void GameSettings::OnPartyInviteReceived(GW::HookStatus* status, GW::Packet::Sto
         // Auto accept join requests if I'm the bigger party
         GW::CtoS::SendPacket(0x8, GAME_CMSG_PARTY_ACCEPT_INVITE, packet->target_party_id);
     }
-    if (instance->flash_window_on_party_invite)
-        FlashWindow();
 }
 
 // Flash window on player added
 void GameSettings::OnPartyPlayerJoined(GW::HookStatus* status, GW::Packet::StoC::PartyPlayerAdd* packet) {
     UNREFERENCED_PARAMETER(status);
+    UNREFERENCED_PARAMETER(packet);
     if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost)
         return;
     GameSettings *instance = &Instance();
     instance->check_message_on_party_change = true;
-    if (instance->flash_window_on_party_invite) {
-        GW::PartyInfo* current_party = GW::PartyMgr::GetPartyInfo();
-        if (!current_party) return;
-        GW::AgentLiving* me = GW::Agents::GetPlayerAsAgentLiving();
-        if (!me) return;
-        if (packet->player_id == me->login_number
-            || (packet->party_id == current_party->party_id && GetPlayerIsLeader())) {
-            FlashWindow();
-        }
-    }
 }
 
 // Block overhead arrow marker for zaishen scout
@@ -2250,17 +2239,13 @@ void GameSettings::OnCinematic(GW::HookStatus* status, GW::Packet::StoC::Cinemat
         GW::Map::SkipCinematic();
         return;
     }
-    if (instance->flash_window_on_cinematic)
-        FlashWindow();
 }
 
 // Flash/focus window on zoning
 void GameSettings::OnMapTravel(GW::HookStatus* status, GW::Packet::StoC::GameSrvTransfer* pak) {
     UNREFERENCED_PARAMETER(status);
-    GameSettings *instance = &Instance();
-    if (instance->flash_window_on_zoning) FlashWindow();
-    if (instance->focus_window_on_zoning && pak->is_explorable)
-        FocusWindow();
+    UNREFERENCED_PARAMETER(pak);
+    GW::CtoS::SendPacket(0x4, GAME_CMSG_PARTY_LEAVE_GROUP);
 }
 
 // Disable native timestamps
