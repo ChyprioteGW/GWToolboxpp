@@ -1944,6 +1944,7 @@ void GameSettings::OnPlayerJoinInstance(GW::HookStatus*, GW::Packet::StoC::Playe
 void GameSettings::OnPartyInviteReceived(GW::HookStatus* status, GW::Packet::StoC::PartyInviteReceived_Create* packet) const
 {
     UNREFERENCED_PARAMETER(status);
+    UNREFERENCED_PARAMETER(packet);
     if (status->blocked)
         return;
     if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost || !GW::PartyMgr::GetIsLeader())
@@ -1963,19 +1964,10 @@ void GameSettings::OnPartyInviteReceived(GW::HookStatus* status, GW::Packet::Sto
 // Flash window on player added
 void GameSettings::OnPartyPlayerJoined(GW::HookStatus* status, GW::Packet::StoC::PartyPlayerAdd* packet) {
     UNREFERENCED_PARAMETER(status);
+    UNREFERENCED_PARAMETER(packet);
     if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost)
         return;
     check_message_on_party_change = true;
-    if (flash_window_on_party_invite) {
-        GW::PartyInfo* current_party = GW::PartyMgr::GetPartyInfo();
-        if (!current_party) return;
-        GW::AgentLiving* me = GW::Agents::GetPlayerAsAgentLiving();
-        if (!me) return;
-        if (packet->player_id == me->login_number
-            || (packet->party_id == current_party->party_id && GW::PartyMgr::GetIsLeader())) {
-            FlashWindow();
-        }
-    }
 }
 
 // Block overhead arrow marker for zaishen scout
@@ -2250,17 +2242,13 @@ void GameSettings::OnCinematic(GW::HookStatus* status, GW::Packet::StoC::Cinemat
         GW::Map::SkipCinematic();
         return;
     }
-    if (flash_window_on_cinematic)
-        FlashWindow();
 }
 
 // Flash/focus window on zoning
 void GameSettings::OnMapTravel(GW::HookStatus* status, GW::Packet::StoC::GameSrvTransfer* pak) const
 {
     UNREFERENCED_PARAMETER(status);
-    if (flash_window_on_zoning) FlashWindow();
-    if (focus_window_on_zoning && pak->is_explorable)
-        FocusWindow();
+    UNREFERENCED_PARAMETER(pak);
 }
 
 void GameSettings::CmdReinvite(const wchar_t*, int, LPWSTR*) const
