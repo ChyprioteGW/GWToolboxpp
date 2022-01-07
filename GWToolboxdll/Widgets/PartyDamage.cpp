@@ -203,7 +203,7 @@ void PartyDamage::CreatePartyIndexMap() {
 
 void PartyDamage::Draw(IDirect3DDevice9* device) {
     UNREFERENCED_PARAMETER(device);
-    if (!visible) return;
+    if (!visible||true) return;
     if (hide_in_outpost && GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost)
         return;
     if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Loading) return;
