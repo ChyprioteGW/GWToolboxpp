@@ -1316,15 +1316,11 @@ void TravelWindow::CmdTP(const wchar_t *message, int argc, LPWSTR *argv)
     uint32_t district_number = 0;
 
     std::wstring argOutpost = GuiUtils::ToLower(argv[1]);
-    std::wstring argDistrict = GuiUtils::ToLower(argv[argc - 1]);
+    std::wstring argDistrict = argc > 2 ? GuiUtils::ToLower(argv[argc - 1]) : L"";
     // Guild hall
     if (argOutpost == L"gh") {
-        if (argDistrict.empty()) {
-            if (IsInGH())
-                GW::GuildMgr::LeaveGH();
-            else
-                GW::GuildMgr::TravelGH();
-            return;
+        if (argDistrict.size() == 0) {
+            return IsInGH() ? GW::GuildMgr::LeaveGH() : GW::GuildMgr::TravelGH();
         }
         std::wstring argGuildTag = GuiUtils::ToLower(argv[2]);
         const GW::GuildArray& guilds = GW::GuildMgr::GetGuildArray();
@@ -1479,21 +1475,23 @@ bool TravelWindow::ParseDistrict(const std::wstring &s, GW::Constants::District 
     std::string compare = GuiUtils::ToLower(GuiUtils::RemovePunctuation(GuiUtils::WStringToString(s)));
     std::string first_word = compare.substr(0, compare.find(' '));
 
-    const std::regex district_regex("([a-z]{2,3})(\\d)?");
-    std::smatch m;
-    if (!std::regex_search(first_word, m, district_regex)) {
-        return false;
+    // Parse the district number
+    if (isdigit(first_word[first_word.length() - 1])) {
+        number = first_word[first_word.length() - 1] - 48;
+        first_word = first_word.substr(0, first_word.size() - 1);
     }
+
     // Shortcut words e.g "/tp ae" for american english
     TravelWindow& instance = Instance();
-    const auto& shorthand_outpost = instance.shorthand_district_names.find(m[1].str());
+    const auto& shorthand_outpost = instance.shorthand_district_names.find(first_word);
+
     if (shorthand_outpost == instance.shorthand_district_names.end()) {
         return false;
     }
-    district = shorthand_outpost->second.district;
-    if (m.size() > 2 && !GuiUtils::ParseUInt(m[2].str().c_str(), &number)) {
-        number = 0;
-    }
+
+    const DistrictAlias& outpost_info = shorthand_outpost->second;
+    district = outpost_info.district;
+    number = outpost_info.district_number ? outpost_info.district_number : number;
 
     return true;
 }
