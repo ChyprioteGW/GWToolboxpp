@@ -36,6 +36,7 @@
 namespace {
     bool outpost_name_array_getter(void* data, int idx, const char** out_text);
 
+    typedef std::function<void(const wchar_t*, int, wchar_t**)> CmdCB;
     bool ImInPresearing() { return GW::Map::GetCurrentMapInfo()->region == GW::Region_Presearing; }
 
     bool outpost_name_array_getter(void *data, int idx, const char **out_text)
@@ -672,7 +673,30 @@ void TravelWindow::TravelButton(const char* text, int x_idx, GW::Constants::MapI
         if (close_on_travel) visible = false;
     }
 }
+void TravelWindow::GuildHallButton(const char* text, int x_idx, GW::Guild* guild)
+{
+    if (x_idx != 0) ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    float w = (ImGui::GetWindowContentRegionWidth() - ImGui::GetStyle().ItemInnerSpacing.x) / 2;
+    bool clicked = false;
+    clicked |= ImGui::Button(text, ImVec2(w, 0));
+    if (clicked) {
+        GW::GuildMgr::TravelGH(guild->key);
+        if (close_on_travel) visible = false;
+    }
+}
 
+char* WcharToChar(wchar_t* wchar) {
+    int i;
+    std::string ret = "";
+
+    for (i = 0; wchar[i]; i++)
+    {
+        ret += static_cast<char>(wchar[i]);
+    }
+    char* cstr = new char[ret.length() + 1];
+    strcpy(cstr, ret.c_str());
+    return cstr;
+}
 void TravelWindow::Draw(IDirect3DDevice9* pDevice)
 {
     UNREFERENCED_PARAMETER(pDevice);
@@ -749,6 +773,17 @@ void TravelWindow::Draw(IDirect3DDevice9* pDevice)
             TravelButton("Gadd's", 1, GW::Constants::MapID::Gadds_Encampment_outpost);
             TravelButton("Urgoz", 0, GW::Constants::MapID::Urgozs_Warren);
             TravelButton("Deep", 1, GW::Constants::MapID::The_Deep);
+
+            GW::Array<GW::Guild*> guilds = GW::GuildMgr::GetGuildArray();
+
+            if (guilds.valid()) {
+                int cnt = 0;
+                for (size_t i = 0; i < guilds.size(); i++) {
+                    if (!guilds[i]) continue;
+                    GuildHallButton(WcharToChar(guilds[i]->name), cnt % 2, guilds[i]);
+                    cnt++;
+                }
+            }
 
             for (int i = 0; i < fav_count; ++i) {
                 ImGui::PushID(i);
@@ -1284,10 +1319,21 @@ void TravelWindow::CmdTP(const wchar_t *message, int argc, LPWSTR *argv)
     std::wstring argDistrict = GuiUtils::ToLower(argv[argc - 1]);
     // Guild hall
     if (argOutpost == L"gh") {
-        if (IsInGH())
-            GW::GuildMgr::LeaveGH();
-        else
-            GW::GuildMgr::TravelGH();
+        if (argDistrict.empty()) {
+            if (IsInGH())
+                GW::GuildMgr::LeaveGH();
+            else
+                GW::GuildMgr::TravelGH();
+            return;
+        }
+        std::wstring argGuildTag = GuiUtils::ToLower(argv[2]);
+        const GW::GuildArray& guilds = GW::GuildMgr::GetGuildArray();
+        for (GW::Guild *guild : guilds) {
+            if (guild && GuiUtils::ToLower(guild->tag) == argGuildTag) {
+                GW::GuildMgr::TravelGH(guild->key);
+                return;
+            }
+        }
         return;
     }
     TravelWindow &instance = Instance();

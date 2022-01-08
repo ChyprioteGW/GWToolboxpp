@@ -2,6 +2,7 @@
 
 #include <GWCA\Constants\Constants.h>
 #include <GWCA\Constants\Maps.h>
+#include <GWCA/GameEntities/Guild.h>
 
 #include <Logger.h>
 #include <ToolboxWindow.h>
@@ -59,6 +60,7 @@ public:
 private:
     // ==== Helpers ====
     void TravelButton(const char* text, int x_idx, GW::Constants::MapID mapid);
+    void GuildHallButton(const char* text, int x_idx, GW::Guild* guild);
     GW::Constants::MapID IndexToOutpostID(int index);
     static bool ParseDistrict(const std::wstring &s, GW::Constants::District &district, uint32_t &number);
     static bool ParseOutpost(const std::wstring &s, GW::Constants::MapID &outpost, GW::Constants::District &district, uint32_t &number);
@@ -154,6 +156,7 @@ private:
     {
         {"ae", {GW::Constants::District::American}},
         {"int", {GW::Constants::District::International}},
+        {"id", {GW::Constants::District::International}},
         {"ee", {GW::Constants::District::EuropeEnglish}},
         {"eg", {GW::Constants::District::EuropeGerman}},
         {"de", {GW::Constants::District::EuropeGerman}},

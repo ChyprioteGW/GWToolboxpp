@@ -45,13 +45,13 @@ bool HeroesAscentWidget::IsHeroesAscentMap()
         return false;
     
     switch (GW::Map::GetMapID()) {
-        case GW::Constants::MapID::The_Underworld_PvP:
+        case GW::Constants::MapID::The_Underworld_arena_mission:
         case GW::Constants::MapID::Fetid_River_mission:
         case GW::Constants::MapID::Burial_Mounds_mission:
         case GW::Constants::MapID::Unholy_Temples_mission:
         case GW::Constants::MapID::Forgotten_Shrines_mission:
         case GW::Constants::MapID::Golden_Gates_mission:
-        case GW::Constants::MapID::The_Courtyard:
+        case GW::Constants::MapID::The_Courtyard_arena_mission:
         case GW::Constants::MapID::Antechamber_mission:
         case GW::Constants::MapID::The_Vault_mission:
         case GW::Constants::MapID::The_Hall_of_Heroes_arena_mission:
@@ -66,13 +66,13 @@ bool HeroesAscentWidget::IsCompetitiveMap()
     if (!IsMapReady()) return false;
 
     switch (GW::Map::GetMapID()) {
-        case GW::Constants::MapID::The_Underworld_PvP:
+        case GW::Constants::MapID::The_Underworld_arena_mission:
         case GW::Constants::MapID::Fetid_River_mission:
         case GW::Constants::MapID::Burial_Mounds_mission:
         case GW::Constants::MapID::Unholy_Temples_mission:
         case GW::Constants::MapID::Forgotten_Shrines_mission:
         case GW::Constants::MapID::Golden_Gates_mission:
-        case GW::Constants::MapID::The_Courtyard:
+        case GW::Constants::MapID::The_Courtyard_arena_mission:
         case GW::Constants::MapID::Antechamber_mission:
         case GW::Constants::MapID::The_Vault_mission:
             return true;
