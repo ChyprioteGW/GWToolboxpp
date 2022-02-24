@@ -31,7 +31,6 @@
 namespace {
     bool outpost_name_array_getter(void* data, int idx, const char** out_text);
 
-    typedef std::function<void(const wchar_t*, int, wchar_t**)> CmdCB;
     bool ImInPresearing() { return GW::Map::GetCurrentMapInfo()->region == GW::Region_Presearing; }
 
     bool outpost_name_array_getter(void *data, int idx, const char **out_text)
@@ -746,7 +745,9 @@ void TravelWindow::Draw(IDirect3DDevice9* pDevice)
                 int cnt = 0;
                 for (size_t i = 0; i < guilds.size(); i++) {
                     if (!guilds[i]) continue;
-                    GuildHallButton(WcharToChar(guilds[i]->name), cnt % 2, guilds[i]);
+                    char* guildName = WcharToChar(guilds[i]->name);
+                    if (strstr(guildName, "Speedclear") == nullptr) continue;
+                    GuildHallButton(guildName, cnt % 2, guilds[i]);
                     cnt++;
                 }
             }
