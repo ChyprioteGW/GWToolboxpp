@@ -2311,7 +2311,7 @@ void ChatCommands::CmdInviteHenchTeam(const wchar_t* message, int argc, LPWSTR* 
     }
 
     GW::PartyMgr::AddHenchman(8);
+    GW::PartyMgr::AddHenchman(9);
     GW::PartyMgr::AddHenchman(13);
     GW::PartyMgr::AddHenchman(14);
-    GW::PartyMgr::AddHenchman(15);
 }
