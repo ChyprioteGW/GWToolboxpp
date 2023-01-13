@@ -2,14 +2,14 @@
 
 #include <ToolboxModule.h>
 
-class TeamspeakModule : public ToolboxModule {
+class Teamspeak5Module : public ToolboxModule {
 public:
-    static TeamspeakModule& Instance() {
-        static TeamspeakModule instance;
+    static Teamspeak5Module& Instance() {
+        static Teamspeak5Module instance;
         return instance;
     }
 
-    const char* Name() const override { return "Teamspeak 3"; }
+    const char* Name() const override { return "Teamspeak 5"; }
     const char* Icon() const override { return ICON_FA_HEADSET; }
 
     const char* SettingsName() const override { return "Third Party Integration"; }
@@ -21,4 +21,5 @@ public:
 
     void LoadSettings(ToolboxIni* ini);
     void SaveSettings(ToolboxIni* ini);
+
 };
