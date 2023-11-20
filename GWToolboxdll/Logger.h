@@ -1,7 +1,7 @@
 #pragma once
 
 #define ASSERT(expr) ((void)(!!(expr) || (Log::FatalAssert(#expr, __FILE__, (unsigned)__LINE__), 0)))
-#define IM_ASSERT(expr) ASSERT(expr)
+//#define IM_ASSERT(expr) ASSERT(expr)
 #include <GWCA/Managers/ChatMgr.h>
 
 constexpr auto GWTOOLBOX_CHAN = GW::Chat::Channel::CHANNEL_GWCA2;

@@ -18,7 +18,7 @@ public:
         return instance;
     }
 
-    [[nodiscard]] const char* Name() const override { return "Toolbox"; }
+    [[nodiscard]] const char* Name() const override { return "My Toolbox"; }
 
     [[nodiscard]] const char* SettingsName() const override { return "Toolbox Settings"; }
 
