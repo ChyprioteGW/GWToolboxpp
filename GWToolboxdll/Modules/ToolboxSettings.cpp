@@ -48,6 +48,7 @@
 #include <Windows/ObjectiveTimerWindow.h>
 #include <Windows/FactionLeaderboardWindow.h>
 #include <Windows/DailyQuestsWindow.h>
+#include <Windows/DialogsWindow.h>
 #include <Windows/FriendListWindow.h>
 #include <Windows/ObserverPlayerWindow.h>
 #include <Windows/ObserverTargetWindow.h>
@@ -188,6 +189,7 @@ namespace {
         ObjectiveTimerWindow::Instance(),
         FactionLeaderboardWindow::Instance(),
         DailyQuests::Instance(),
+        DialogsWindow::Instance(),
         FriendListWindow::Instance(),
         ObserverPlayerWindow::Instance(),
         ObserverTargetWindow::Instance(),
