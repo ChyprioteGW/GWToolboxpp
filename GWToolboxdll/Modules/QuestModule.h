@@ -1,6 +1,6 @@
 #pragma once
-#include <IconsFontAwesome5.h>
 
+#include <IconsFontAwesome5.h>
 #include <ToolboxModule.h>
 
 namespace GW {
