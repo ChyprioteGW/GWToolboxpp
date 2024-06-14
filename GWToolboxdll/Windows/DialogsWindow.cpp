@@ -11,6 +11,7 @@
 
 #include <Modules/Resources.h>
 #include <Windows/DialogsWindow.h>
+#include <ImGuiAddons.h>
 
 namespace {
     static const char* const questnames[] = {

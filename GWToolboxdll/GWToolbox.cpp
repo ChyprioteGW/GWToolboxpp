@@ -738,26 +738,6 @@ void GWToolbox::SignalTerminate(bool detach_dll)
     }
 }
 
-void GWToolbox::Enable()
-{
-    if (!gwtoolbox_disabled)
-        return;
-    GW::EnableHooks();
-    gwtoolbox_disabled = false;
-}
-
-void GWToolbox::Disable()
-{
-    if (gwtoolbox_disabled)
-        return;
-    GW::DisableHooks();
-    GW::RenderModule.enable_hooks();
-    if (OnMinOrRestoreOrExitBtnClicked_Func)
-        GW::HookBase::EnableHooks(OnMinOrRestoreOrExitBtnClicked_Func);
-    AttachRenderCallback();
-    gwtoolbox_disabled = true;
-}
-
 bool GWToolbox::CanTerminate()
 {
     return modules_terminating.empty()
@@ -827,19 +807,6 @@ void GWToolbox::Draw(IDirect3DDevice9* device)
         io.IniFilename = imgui_inifile.bytes;
         imgui_inifile_changed = false;
     }
-    if (gwtoolbox_disabled) {
-        if (!ShouldDisableToolbox()) {
-            Enable();
-        }
-        return;
-    }
-    else if (ShouldDisableToolbox()) {
-        Disable();
-        return;
-    }
-    // Draw loop
-    Resources::DxUpdate(device);
-
     if (!CanRenderToolbox())
         return;
 

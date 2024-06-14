@@ -38,8 +38,6 @@ public:
     static void Initialize();
     static void SignalTerminate(bool detach_dll = true);
     static void Update(GW::HookStatus* status = nullptr);
-    static void Enable();
-    static void Disable();
     static bool CanTerminate();
 
     static std::filesystem::path SaveSettings();
