@@ -30,6 +30,9 @@ namespace GuiUtils {
     float GetPartyHealthbarHeight();
     float GetGWScaleMultiplier(bool force = false);
 
+    bool ParseInt(const char* str, int* val, int base = 0);
+    bool ParseInt(const wchar_t* str, int* val, int base = 0);
+
     // Reposition a rect within its container to make sure it isn't overflowing it.
     ImVec4& ClampRect(ImVec4& rect, const ImVec4& viewport);
 

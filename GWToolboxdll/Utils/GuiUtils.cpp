@@ -244,6 +244,28 @@ namespace GuiUtils {
     {
         return Resources::GetGWScaleMultiplier(force);
     }
+    
+    bool ParseInt(const char* str, int* val, const int base)
+    {
+        char* end;
+        *val = strtol(str, &end, base);
+        if (*end != 0 || errno == ERANGE) {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool ParseInt(const wchar_t* str, int* val, const int base)
+    {
+        wchar_t* end;
+        *val = wcstol(str, &end, base);
+        if (*end != 0 || errno == ERANGE) {
+            return false;
+        }
+
+        return true;
+    }
 
     ImVec4& ClampRect(ImVec4& rect, const ImVec4& viewport)
     {

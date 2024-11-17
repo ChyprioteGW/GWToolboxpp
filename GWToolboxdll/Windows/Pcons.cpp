@@ -33,7 +33,6 @@ int Pcon::lunar_delay = 500;
 bool Pcon::disable_when_not_found = true;
 bool Pcon::refill_if_below_threshold = false;
 bool Pcon::always_refill_pcons = false;
-DWORD Pcon::player_id = 0;
 Color Pcon::enabled_bg_color = Colors::ARGB(102, 0, 255, 0);
 
 DWORD Pcon::alcohol_level = 0;

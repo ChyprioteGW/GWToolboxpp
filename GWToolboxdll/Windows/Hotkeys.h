@@ -262,13 +262,14 @@ private:
 };
 
 class HotkeyAction : public TBHotkey {
-    const int n_actions = 5;
+    const int n_actions = 6;
 
     enum Action {
         OpenXunlaiChest,
         DropGoldCoin = 2,
         ReapplyTitle,
         EnterChallenge,
+        OpenLockedChest,
     };
 
     static const char* GetText(void*, int idx);
