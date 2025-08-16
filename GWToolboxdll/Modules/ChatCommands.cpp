@@ -173,7 +173,7 @@ namespace {
             if (agent == nullptr || agent == me
                 || !agent->GetIsLivingType() || agent->GetIsDead()
                 || agent->allegiance == GW::Constants::Allegiance::Enemy
-                || !GW::Agents::GetIsAgentTargettable(agent)) {
+            ) {
                 continue;
             }
             const float this_distance = GetSquareDistance(me->pos, agent->pos);
@@ -1698,9 +1698,6 @@ void ChatCommands::SearchAgent::Init(const wchar_t* _search, const TargetType ty
     }
     for (const GW::Agent* agent : *agents) {
         if (!agent) {
-            continue;
-        }
-        if (!GW::Agents::GetIsAgentTargettable(agent)) {
             continue;
         }
         switch (type) {

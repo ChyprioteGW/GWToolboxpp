@@ -1512,6 +1512,14 @@ void HotkeyAction::Execute()
                 GW::Items::OpenXunlaiWindow();
                 });
             break;
+        case OpenLockedChest:
+            if (isExplorable()) {
+                const GW::Agent* target = GW::Agents::GetTarget();
+                if (target && target->GetIsGadgetType()) {
+                    GW::Items::OpenLockedChest();
+                }
+            }
+            break;
         case DropGoldCoin:
             if (isExplorable()) {
                 GW::Items::DropGold(1);

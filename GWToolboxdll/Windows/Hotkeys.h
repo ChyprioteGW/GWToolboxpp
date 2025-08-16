@@ -265,6 +265,7 @@ class HotkeyAction : public TBHotkey {
         DropGoldCoin = 2,
         ReapplyTitle,
         EnterChallenge,
+        OpenLockedChest,
     };
 
     static const char* GetText(void*, int idx);
