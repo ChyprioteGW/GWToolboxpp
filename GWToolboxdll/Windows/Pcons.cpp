@@ -34,6 +34,7 @@ int Pcon::pcons_delay = 5000;
 int Pcon::lunar_delay = 500;
 bool Pcon::disable_when_not_found = true;
 bool Pcon::refill_if_below_threshold = false;
+bool Pcon::always_refill_pcons = false;
 Color Pcon::enabled_bg_color = Colors::ARGB(102, 0, 255, 0);
 
 DWORD Pcon::alcohol_level = 0;
@@ -96,7 +97,7 @@ void Pcon::SetEnabled(const bool b)
     }
     *enabled = b;
     ResetCounts();
-    Refill(refill_if_below_threshold && IsEnabled() && PconsWindow::Instance().GetEnabled());
+    Refill(refill_if_below_threshold && IsEnabled() && (PconsWindow::Instance().GetEnabled() || always_refill_pcons));
 }
 
 bool Pcon::IsVisible() const
@@ -186,7 +187,7 @@ void Pcon::Update(int delay)
         maptype = GW::Map::GetInstanceType();
         SetPlayerName();
         ResetCounts();
-        Refill(refill_if_below_threshold && IsEnabled() && PconsWindow::Instance().GetEnabled());
+        Refill(refill_if_below_threshold && IsEnabled() && (PconsWindow::Instance().GetEnabled() || always_refill_pcons));
     }
     // Refill pcons if needed.
     UpdateRefill();
@@ -202,7 +203,7 @@ void Pcon::Update(int delay)
         quantity = qty;
         if (maptype == GW::Constants::InstanceType::Outpost) {
             quantity_storage = CheckInventory(nullptr, nullptr, static_cast<int>(GW::Constants::Bag::Storage_1), static_cast<int>(GW::Constants::Bag::Storage_14));
-            if (IsEnabled() && PconsWindow::Instance().GetEnabled() && !refilling) {
+            if (IsEnabled() && (PconsWindow::Instance().GetEnabled() || always_refill_pcons) && !refilling) {
                 // Only warn user of low pcon count if is enabled and we're in an outpost.
                 if (quantity == 0) {
                     Log::Error("No more %s items found", chat.c_str());

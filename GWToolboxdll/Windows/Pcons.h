@@ -14,6 +14,7 @@ public:
     static float size;
     static bool disable_when_not_found;
     static bool refill_if_below_threshold;
+    static bool always_refill_pcons;
     static bool pcons_by_character;
     static Color enabled_bg_color;
 
