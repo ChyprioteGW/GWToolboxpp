@@ -1516,7 +1516,7 @@ void HotkeyAction::Execute()
             if (isExplorable()) {
                 const GW::Agent* target = GW::Agents::GetTarget();
                 if (target && target->GetIsGadgetType()) {
-                    GW::Items::OpenLockedChest();
+                    //GW::Items::OpenLockedChest();
                 }
             }
             break;
