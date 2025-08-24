@@ -229,10 +229,6 @@ void DialogModule::OnDialogSent(const uint32_t dialog_id)
             return GetQuestID(pair.first) == quest_id && queued_at == pair.second;
         });
     }
-    if (IsUWTele(dialog_id)) {
-        queued_dialogs_to_send.erase(GW::Constants::DialogID::UwTeleEnquire);
-        queued_dialogs_to_send.erase(dialog_id - 0x7);
-    }
 }
 
 void DialogModule::Initialize()

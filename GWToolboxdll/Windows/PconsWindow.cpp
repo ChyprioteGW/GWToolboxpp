@@ -809,6 +809,7 @@ void PconsWindow::LoadSettings(ToolboxIni* ini)
     Pcon::pcons_by_character = ini->GetBoolValue(Name(), VAR_NAME(pcons_by_character), Pcon::pcons_by_character);
     Pcon::hide_city_pcons_in_explorable_areas = ini->GetBoolValue(Name(), VAR_NAME(hide_city_pcons_in_explorable_areas), Pcon::hide_city_pcons_in_explorable_areas);
     Pcon::refill_if_below_threshold = ini->GetBoolValue(Name(), VAR_NAME(refill_if_below_threshold), Pcon::refill_if_below_threshold);
+    Pcon::always_refill_pcons = ini->GetBoolValue(Name(), VAR_NAME(always_refill_pcons), Pcon::always_refill_pcons);
     LOAD_BOOL(show_auto_refill_pcons_tickbox);
     LOAD_BOOL(show_auto_disable_pcons_tickbox);
 
@@ -868,6 +869,7 @@ void PconsWindow::SaveSettings(ToolboxIni* ini)
     ini->SetBoolValue(Name(), VAR_NAME(hide_city_pcons_in_explorable_areas), Pcon::hide_city_pcons_in_explorable_areas);
 
     ini->SetBoolValue(Name(), VAR_NAME(refill_if_below_threshold), Pcon::refill_if_below_threshold);
+    ini->SetBoolValue(Name(), VAR_NAME(always_refill_pcons), Pcon::always_refill_pcons);
     SAVE_BOOL(show_auto_refill_pcons_tickbox);
     SAVE_BOOL(show_auto_disable_pcons_tickbox);
     SAVE_BOOL(shift_click_toggles_category);
@@ -913,6 +915,8 @@ void PconsWindow::DrawSettingsInternal()
     ImGui::Checkbox("Shift + Click toggles category", &shift_click_toggles_category);
     ImGui::ShowHelp("If this is ticked, clicking on a pcon while holding shift will enable/disable all of the same category\n"
         "Categories: Conset, Rock Candies, Kabob+Soup+Salad");
+    ImGui::Checkbox("Always refill pcons", &Pcon::always_refill_pcons);
+    ImGui::ShowHelp("If this is ticked, pcons will be refilled even if automatic pcon usage is disabled.");
     ImGui::NextSpacedElement();
     ImGui::Checkbox("Show Enable/Disable button", &show_enable_button);
     ImGui::NextSpacedElement();
