@@ -772,9 +772,9 @@ bool GWToolbox::IsProfilingEnabled()
 }
 
 bool GWToolbox::ShouldDisableToolbox(GW::Constants::MapID map_id)
-{
-    const auto m = GW::Map::GetMapInfo(map_id);
-    return m && m->GetIsPvP();
+{    
+    UNREFERENCED_PARAMETER(map_id);
+    return false;
 }
 
 bool GWToolbox::IsInitialized()
@@ -1026,23 +1026,6 @@ void GWToolbox::SignalTerminate(bool detach_dll)
     }
 }
 
-void GWToolbox::Enable()
-{
-    if (!gwtoolbox_disabled) return;
-    GW::EnableHooks();
-    gwtoolbox_disabled = false;
-}
-
-void GWToolbox::Disable()
-{
-    if (gwtoolbox_disabled) return;
-    GW::DisableHooks();
-    GW::Render::EnableHooks();
-    if (OnUiRoot_UICallback_Func) GW::Hook::EnableHooks(OnUiRoot_UICallback_Func);
-    AttachRenderCallback();
-    gwtoolbox_disabled = true;
-}
-
 bool GWToolbox::CanTerminate()
 {
     return modules_terminating.empty() && FontLoader::FontsLoaded() && modules_enabled.empty() && !imgui_initialized && !event_handler_attached;
@@ -1136,16 +1119,6 @@ void GWToolbox::Draw(IDirect3DDevice9* device)
         auto& io = ImGui::GetIO();
         io.IniFilename = imgui_inifile.bytes;
         imgui_inifile_changed = false;
-    }
-    if (gwtoolbox_disabled) {
-        if (!ShouldDisableToolbox()) {
-            Enable();
-        }
-        return;
-    }
-    if (ShouldDisableToolbox()) {
-        Disable();
-        return;
     }
 
     Resources::DxUpdate(device);
