@@ -59,6 +59,7 @@ private:
 
     static void CHAT_CMD_FUNC(CmdEnterMission);
     static void CHAT_CMD_FUNC(CmdAge2);
+    static void CHAT_CMD_FUNC(CmdMove);
     static void CHAT_CMD_FUNC(CmdDialog);
     static void CHAT_CMD_FUNC(CmdTB);
     static void CHAT_CMD_FUNC(CmdObserverReset);

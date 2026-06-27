@@ -214,7 +214,10 @@ namespace {
 
         const GW::Agent* closest = nullptr;
         for (const auto agent : *agents) {
-            if (agent == me || !GW::Agents::GetAgentMatchesFlags(agent, AgentEETargetType)) {
+            if (agent == me
+                || !agent->GetIsLivingType() || agent->GetIsDead()
+                || agent->allegiance == GW::Constants::Allegiance::Enemy
+            ) {
                 continue;
             }
             const float this_distance = GetSquareDistance(me->pos, agent->pos);
@@ -1983,6 +1986,7 @@ void ChatCommands::Initialize()
         {L"chat", CmdChatTab},
         {L"enter", CmdEnterMission},
         {L"age2", CmdAge2},
+        {L"move", CmdMove},
         {L"dialog", CmdDialog},
         {L"show", CmdShow},
         {L"hide", CmdHide},
@@ -2344,6 +2348,20 @@ void CHAT_CMD_FUNC(ChatCommands::CmdAge2)
     TimerWidget::Instance().PrintTimer();
 }
 
+void CHAT_CMD_FUNC(ChatCommands::CmdMove)
+{
+    if (argc != 3) {
+        Log::Error("[Error] Format /move x y");
+        return;
+    }
+
+    const float x = (float) _wtof(argv[1]);
+    const float y = (float) _wtof(argv[2]);
+
+    GW::Vec2f location(x, y);
+    GW::Agents::Move(location.x, location.y);
+    Log::Flash("Moving to (%.0f, %.0f)", x, y);
+}
 
 
 void CHAT_CMD_FUNC(ChatCommands::CmdDialog)
