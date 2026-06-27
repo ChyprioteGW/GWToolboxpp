@@ -408,6 +408,9 @@ namespace {
         ASSERT(item && item->quantity);
         const uint16_t to_move = std::min<uint16_t>(item->quantity, quantity);
         uint16_t remaining = to_move;
+        if (remaining) {
+            remaining -= complete_existing_stack(item, GW::Constants::Bag::Storage_1, GW::Constants::Bag::Storage_14, remaining);
+        }
         const bool is_storage_open = GW::Items::GetIsStorageOpen();
         if (remaining && is_storage_open && item->GetIsMaterial() && GameSettings::GetSettingBool("move_materials_to_current_storage_pane")) {
             remaining -= move_item_to_storage_page(item, GW::Items::GetStoragePage(), remaining);
@@ -420,9 +423,6 @@ namespace {
             remaining -= move_item_to_storage_page(item, GW::Items::GetStoragePage(), remaining);
         }
 
-        if (remaining) {
-            remaining -= complete_existing_stack(item, GW::Constants::Bag::Storage_1, GW::Constants::Bag::Storage_14, remaining);
-        }
         while (remaining) {
             const uint16_t moved = move_to_first_empty_slot(item, GW::Constants::Bag::Storage_1, GW::Constants::Bag::Storage_14, remaining);
             if (!moved) {
