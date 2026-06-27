@@ -214,10 +214,7 @@ namespace {
 
         const GW::Agent* closest = nullptr;
         for (const auto agent : *agents) {
-            if (agent == me
-                || !agent->GetIsLivingType() || agent->GetIsDead()
-                || agent->allegiance == GW::Constants::Allegiance::Enemy
-            ) {
+            if (agent == me || !GW::Agents::GetAgentMatchesFlags(agent, AgentEETargetType)) {
                 continue;
             }
             const float this_distance = GetSquareDistance(me->pos, agent->pos);

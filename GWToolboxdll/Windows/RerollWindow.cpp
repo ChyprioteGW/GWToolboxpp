@@ -567,6 +567,9 @@ void RerollWindow::Draw(IDirect3DDevice9*)
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.f, 0.5f));
         auto available_chars_vector = std::ranges::to<std::vector>(*available_chars_ptr);
         std::ranges::sort(available_chars_vector, [](const auto& a, const auto& b) {
+            if (a.is_pvp() != b.is_pvp()) {
+                return !a.is_pvp();
+            }
             return std::wstring_view(a.player_name) < std::wstring_view(b.player_name);
         });
         for (const auto& [idx, character] : available_chars_vector | std::views::enumerate) {

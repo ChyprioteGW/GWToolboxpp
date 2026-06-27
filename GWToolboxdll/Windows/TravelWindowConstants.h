@@ -40,7 +40,10 @@ const std::map<const std::string, const OutpostAlias> default_outpost_aliases = 
     {"ra", {GW::Constants::MapID::Random_Arenas_outpost}},
     {"ha", {GW::Constants::MapID::Heroes_Ascent_outpost}},
     {"fa", {GW::Constants::MapID::Fort_Aspenwood_Kurzick_outpost}},
-    {"jq", {GW::Constants::MapID::The_Jade_Quarry_Kurzick_outpost}}
+    {"jq", {GW::Constants::MapID::The_Jade_Quarry_Kurzick_outpost}},
+    {"thk", {GW::Constants::MapID::Thunderhead_Keep}},
+    {"soo", {GW::Constants::MapID::Vloxs_Falls}},
+    {"bog", {GW::Constants::MapID::Gadds_Encampment_outpost}}
 };
 
 // List of shorthand district names. This is checked for an exact match.
@@ -48,6 +51,7 @@ const std::map<const std::string, const DistrictAlias> shorthand_district_names 
 {
     {"ae", {GW::Constants::District::American}},
     {"int", {GW::Constants::District::International}},
+    {"id", {GW::Constants::District::International}},
     {"ee", {GW::Constants::District::EuropeEnglish}},
     {"eg", {GW::Constants::District::EuropeGerman}},
     {"de", {GW::Constants::District::EuropeGerman}},
