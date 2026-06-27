@@ -305,14 +305,14 @@ LONG WINAPI CrashHandler::Crash(EXCEPTION_POINTERS* pExceptionPointers, const ch
 
 
 #ifndef _DEBUG
-    if (!Updater::IsLatestVersion()) {
-        const std::wstring error_message = L"YOU ARE NOT USING THE LATEST VERSION OF GWTOOLBOX++!\n\n"
-            L"Please update to the latest version before reporting any issues.\n"
-            L"No crash dump will be created because the issue may have already been fixed.";
+    // if (!Updater::IsLatestVersion()) {
+    //     const std::wstring error_message = L"YOU ARE NOT USING THE LATEST VERSION OF GWTOOLBOX++!\n\n"
+    //         L"Please update to the latest version before reporting any issues.\n"
+    //         L"No crash dump will be created because the issue may have already been fixed.";
 
-        MessageBoxW(nullptr, error_message.c_str(), L"GWToolbox++ - Outdated Version", MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
-        TerminateProcess(GetCurrentProcess(), 1);
-    }
+    //     MessageBoxW(nullptr, error_message.c_str(), L"GWToolbox++ - Outdated Version", MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
+    //     TerminateProcess(GetCurrentProcess(), 1);
+    // }
     if (!PluginModule::GetPlugins().empty()) {
         const std::wstring error_message = L"YOU ARE USING PLUGINS!\n\n"
             L"Do not report issues that happen while you are using plugins.\n"
