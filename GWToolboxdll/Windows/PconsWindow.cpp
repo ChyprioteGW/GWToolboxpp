@@ -408,6 +408,7 @@ void PconsWindow::Initialize()
     SettingsRegistry::RegisterField(this, "enabled_bg_color", &Pcon::enabled_bg_color);
     SettingsRegistry::RegisterField(this, "disable_when_not_found", &Pcon::disable_when_not_found);
     SettingsRegistry::RegisterField(this, "refill_if_below_threshold", &Pcon::refill_if_below_threshold);
+    SettingsRegistry::RegisterField(this, "always_refill_pcons", &Pcon::always_refill_pcons);
     SettingsRegistry::RegisterField(this, "pcons_by_character", &Pcon::pcons_by_character);
     SettingsRegistry::RegisterField(this, "hide_city_pcons_in_explorable_areas", &Pcon::hide_city_pcons_in_explorable_areas);
     SettingsRegistry::RegisterField(this, "suppress_drunk_effect", &Pcon::suppress_drunk_effect);
@@ -716,7 +717,7 @@ bool PconsWindow::SetEnabled(const bool b)
         return enabled; // Do nothing - already enabled/disabled.
     }
     enabled = b;
-    Refill(enabled && Pcon::refill_if_below_threshold);
+    Refill(enabled && (Pcon::refill_if_below_threshold || Pcon::always_refill_pcons));
     switch (GW::Map::GetInstanceType()) {
         case InstanceType::Outpost:
             if (settings.tick_with_pcons) {
@@ -851,6 +852,8 @@ void PconsWindow::DrawSettingsInternal()
     ImGui::CheckboxWithHelp("Disable when not found", &Pcon::disable_when_not_found, "Toolbox will disable a pcon if it is not found in the inventory");
     ImGui::NextSpacedElement();
     ImGui::CheckboxWithHelp("Refill from storage", &Pcon::refill_if_below_threshold, "Toolbox will refill pcons from storage if below the threshold");
+    ImGui::NextSpacedElement();
+    ImGui::CheckboxWithHelp("Always refill pcons", &Pcon::always_refill_pcons, "If this is ticked, pcons will be refilled even if automatic pcon usage is disabled.");
     ImGui::NextSpacedElement();
     ImGui::CheckboxWithHelp("Show storage quantity in outpost", &settings.show_storage_quantity,
         "Display a number on the bottom of each pcon icon, showing total quantity in storage.\n"
