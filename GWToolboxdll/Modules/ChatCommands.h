@@ -10,6 +10,10 @@
 #include <ToolboxUIElement.h>
 #include <Modules/PluginModule.h>
 
+namespace GW {
+    enum AgentTargetFlags : uint32_t;
+}
+
 class ChatCommands : public ToolboxModule {
 
 public:
@@ -19,37 +23,23 @@ public:
         return instance;
     }
 
-    struct PendingTransmo {
-        PendingTransmo(const DWORD _npcid = 0, const DWORD _scale = 0x64000000, const DWORD _npcmfid = 0, const DWORD _npcmfd = 0, const DWORD _flags = 0)
-            : npc_id(_npcid)
-            , scale(_scale)
-            , npc_model_file_id(_npcmfid)
-            , npc_model_file_data(_npcmfd)
-            , flags(_flags) { };
-        DWORD npc_id = 0;
-        DWORD scale = 0x64000000;
-        DWORD npc_model_file_id = 0;
-        DWORD npc_model_file_data = 0;
-        DWORD flags = 0;
-    };
-
-    enum TargetType : uint32_t {
-        Gadget = 1,
-        Player = 2,
-        Npc = 4,
-        Item = 8,
-        Living = 16,
-        Enemy = 32,
-        Ally = 64
-    };
-
     [[nodiscard]] const char* Name() const override { return "Chat Commands"; }
     [[nodiscard]] const char* SettingsName() const override { return "Chat Settings"; }
 
+    // MSVC can't reflect member names of internal-linkage types, so settings structs are nested in the class
+    struct Settings {
+        uint32_t default_title_id = std::to_underlying(GW::Constants::TitleID::Lightbringer);
+    };
+
+    struct CmdAliasSetting {
+        std::string alias;
+        std::string command;
+    };
+
     void Initialize() override;
     void Terminate() override;
-    void LoadSettings(ToolboxIni* ini) override;
-    void SaveSettings(ToolboxIni* ini) override;
+    void LoadSettings(SettingsDoc& doc, ToolboxIni* ini) override;
+    void SaveSettings(SettingsDoc& doc) override;
     void DrawSettingsInternal() override;
 
     void DrawHelp() override;
@@ -60,11 +50,7 @@ public:
     void Update(float delta) override;
 
     static void CHAT_CMD_FUNC(CmdReapplyTitle);
-
-    // Add a /setting <setting_name> [1|0|toggle] command to easily change a static setting in memory. NB: static_setting_ptr MUST be a pointer to a STATIC location in memory!
-    static void RegisterSettingChatCommand(const wchar_t* setting_name, const bool* static_setting_ptr, const wchar_t* description = nullptr);
-
-    static void RemoveSettingChatCommand(const wchar_t* setting_name);
+    static void CHAT_CMD_FUNC(CmdCustomMarker);
 
 private:
     static bool ReadTemplateFile(const std::wstring& path, char* buff, size_t buffSize);
@@ -73,13 +59,12 @@ private:
 
     static void CHAT_CMD_FUNC(CmdEnterMission);
     static void CHAT_CMD_FUNC(CmdAge2);
+    static void CHAT_CMD_FUNC(CmdMove);
     static void CHAT_CMD_FUNC(CmdDialog);
     static void CHAT_CMD_FUNC(CmdTB);
     static void CHAT_CMD_FUNC(CmdObserverReset);
     static void CHAT_CMD_FUNC(CmdChest);
     static void CHAT_CMD_FUNC(CmdAfk);
-    static void CHAT_CMD_FUNC(CmdTarget);
-    static void CHAT_CMD_FUNC(CmdUseSkill);
     static void CHAT_CMD_FUNC(CmdShow);
     static void CHAT_CMD_FUNC(CmdHide);
     static void CHAT_CMD_FUNC(CmdToggle);
@@ -87,13 +72,8 @@ private:
     static void CHAT_CMD_FUNC(CmdSCWiki);
     static void CHAT_CMD_FUNC(CmdLoad);
     static void CHAT_CMD_FUNC(CmdPingBuild);
-    static void CHAT_CMD_FUNC(CmdTransmo);
     static void CHAT_CMD_FUNC(CmdResize);
     static void CHAT_CMD_FUNC(CmdPingEquipment);
-    static void CHAT_CMD_FUNC(CmdTransmoTarget);
-    static void CHAT_CMD_FUNC(CmdTransmoParty);
-    static void CHAT_CMD_FUNC(CmdTransmoAgent);
-    static void CHAT_CMD_FUNC(CmdHeroBehaviour);
     static void CHAT_CMD_FUNC(CmdPingQuest);
     static void CHAT_CMD_FUNC(CmdMorale);
     static void CHAT_CMD_FUNC(CmdVolume);
@@ -105,43 +85,11 @@ private:
     static void CHAT_CMD_FUNC(CmdWithdraw);
     static void CHAT_CMD_FUNC(CmdDeposit);
 
-    static void TransmoAgent(DWORD agent_id, PendingTransmo& transmo);
-    static bool GetNPCInfoByName(const std::string& name, PendingTransmo& transmo);
-    static bool GetNPCInfoByName(const std::wstring& name, PendingTransmo& transmo);
-    static bool ParseScale(int scale, PendingTransmo& transmo);
-    static bool GetTargetTransmoInfo(PendingTransmo& transmo);
-    static void TargetNearest(const wchar_t* model_id_or_name, uint32_t type);
-    static const wchar_t* GetRemainingArgsWstr(const wchar_t* message, int argc_start);
+    static void TargetNearest(const wchar_t* model_id_or_name, GW::AgentTargetFlags type);
 
     static std::vector<ToolboxUIElement*> CHAT_CMD_FUNC(MatchingWindows);
     static GW::UI::WindowID CHAT_CMD_FUNC(MatchingGWWindow);
 
-    uint32_t default_title_id = std::to_underlying(GW::Constants::TitleID::Lightbringer);
-
-    struct SearchAgent {
-        clock_t started = 0;
-        std::vector<std::pair<uint32_t, GuiUtils::EncString*>> npc_names;
-        std::wstring search;
-        void Init(const wchar_t* _search, const uint32_t type = 0xffffffff);
-        void Update();
-        void Terminate() { Reset(); }
-        void Reset()
-        {
-            started = 0;
-            search.clear();
-            for (const auto& name : npc_names | std::views::values) {
-                name->Release();
-            }
-            npc_names.clear();
-        }
-    } npc_to_find;
-
-    struct SkillToUse {
-        uint32_t slot = 0; // 1-8 range
-        float skill_usage_delay = 0.f;
-        clock_t skill_timer = clock();
-        void Update();
-    } skill_to_use;
 
     struct QuestPing {
         GW::Constants::QuestID quest_id = static_cast<GW::Constants::QuestID>(0);

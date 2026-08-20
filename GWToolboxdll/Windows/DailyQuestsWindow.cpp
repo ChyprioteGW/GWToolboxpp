@@ -11,20 +11,22 @@
 
 #include <GWCA/Utilities/Hook.h>
 
-#include <Utils/GuiUtils.h>
 #include <Logger.h>
+#include <Utils/GuiUtils.h>
 
-#include <Windows/TravelWindow.h>
-#include <Windows/DailyQuestsWindow.h>
 #include <Constants/EncStrings.h>
-#include <Modules/Resources.h>
-#include <Utils/ToolboxUtils.h>
-#include <Timer.h>
+#include <Constants/ZaishenMissionMaps.h>
 #include <Modules/InventoryManager.h>
-#include <Windows/CompletionWindow.h>
+#include <Modules/Resources.h>
+#include <Timer.h>
 #include <Utils/TextUtils.h>
+#include <Utils/ToolboxUtils.h>
+#include <Windows/CompletionWindow.h>
+#include <Windows/DailyQuestsWindow.h>
+#include <Windows/TravelWindow.h>
 
 using GW::Constants::MapID;
+using GW::Constants::QuestID;
 
 namespace {
     constexpr size_t ZAISHEN_BOUNTY_COUNT = 66;
@@ -43,55 +45,28 @@ namespace {
 
     class ZaishenQuestData : public DailyQuests::QuestData {
     public:
-        ZaishenQuestData(MapID map_id = (MapID)0, const wchar_t* enc_name = nullptr)
-            : QuestData(map_id, enc_name) {};
+        ZaishenQuestData(MapID map_id = (MapID)0, const wchar_t* enc_name = nullptr) : QuestData(map_id, enc_name) {};
 
-        ZaishenQuestData(const wchar_t* enc_name = nullptr, MapID map_id = (MapID)0)
-            : QuestData(map_id, enc_name) {};
+        ZaishenQuestData(const wchar_t* enc_name = nullptr, MapID map_id = (MapID)0) : QuestData(map_id, enc_name) {};
         const MapID GetQuestGiverOutpost() override;
     };
 
     class ZaishenVanquishQuestData : public ZaishenQuestData {
     public:
-        ZaishenVanquishQuestData(MapID map_id = (MapID)0, const wchar_t* enc_name = nullptr)
-            : ZaishenQuestData(map_id, enc_name) {};
+        ZaishenVanquishQuestData(MapID map_id = (MapID)0, const wchar_t* enc_name = nullptr) : ZaishenQuestData(map_id, enc_name) {};
         const MapID GetQuestGiverOutpost() override;
     };
 
     class WantedQuestData : public DailyQuests::QuestData {
     public:
-        WantedQuestData(MapID map_id = (MapID)0, const wchar_t* enc_name = nullptr)
-            : QuestData(map_id, enc_name) {};
+        WantedQuestData(MapID map_id = (MapID)0, const wchar_t* enc_name = nullptr) : QuestData(map_id, enc_name) {};
         const MapID GetQuestGiverOutpost() override;
     };
 
 
-    // Cache map
-    std::map<std::wstring, GuiUtils::EncString*> region_names;
-
-    constexpr std::array hard_coded_wanted_by_shining_blade_names = {
-        "Justiciar Kimii",
-        "Zaln the Jaded",
-        "Justiciar Sevaan",
-        "Insatiable Vakar",
-        "Amalek the Unmerciful",
-        "Carnak the Hungry",
-        "Valis the Rampant",
-        "Cerris",
-        "Sarnia the Red-Handed",
-        "Destor the Truth Seeker",
-        "Selenas the Blunt",
-        "Justiciar Amilyn",
-        "Maximilian the Meticulous",
-        "Joh the Hostile",
-        "Barthimus the Provident",
-        "Calamitous",
-        "Greves the Overbearing",
-        "Lev the Condemned",
-        "Justiciar Marron",
-        "Justiciar Kasandra",
-        "Vess the Disputant"
-    };
+    constexpr std::array hard_coded_wanted_by_shining_blade_names = {"Justiciar Kimii",        "Zaln the Jaded",          "Justiciar Sevaan",  "Insatiable Vakar",   "Amalek the Unmerciful",     "Carnak the Hungry", "Valis the Rampant",       "Cerris",
+                                                                     "Sarnia the Red-Handed",  "Destor the Truth Seeker", "Selenas the Blunt", "Justiciar Amilyn",   "Maximilian the Meticulous", "Joh the Hostile",   "Barthimus the Provident", "Calamitous",
+                                                                     "Greves the Overbearing", "Lev the Condemned",       "Justiciar Marron",  "Justiciar Kasandra", "Vess the Disputant"};
 
     static_assert(hard_coded_wanted_by_shining_blade_names.size() == WANTED_COUNT);
 
@@ -112,58 +87,19 @@ namespace {
     std::unordered_map<std::wstring, uint16_t> nicholas_sandford_item_collected_count;
 
     DailyQuests::QuestData nicholas_sandford_cycles[] = {
-        {MapID::None, GW::EncStrings::GrawlNecklaces},
-        {MapID::None, GW::EncStrings::BakedHusks},
-        {MapID::None, GW::EncStrings::SkeletalLimbs},
-        {MapID::None, GW::EncStrings::UnnaturalSeeds},
-        {MapID::None, GW::EncStrings::EnchantedLodestones},
-        {MapID::None, GW::EncStrings::SkaleFins},
-        {MapID::None, GW::EncStrings::IcyLodestones},
-        {MapID::None, GW::EncStrings::GargoyleSkulls},
-        {MapID::None, GW::EncStrings::DullCarapaces},
-        {MapID::None, GW::EncStrings::BakedHusks},
-        {MapID::None, GW::EncStrings::RedIrisFlowers},
-        {MapID::None, GW::EncStrings::SpiderLegs},
-        {MapID::None, GW::EncStrings::SkeletalLimbs},
-        {MapID::None, GW::EncStrings::CharrCarvings},
-        {MapID::None, GW::EncStrings::EnchantedLodestones},
-        {MapID::None, GW::EncStrings::GrawlNecklaces},
-        {MapID::None, GW::EncStrings::IcyLodestones},
-        {MapID::None, GW::EncStrings::WornBelts},
-        {MapID::None, GW::EncStrings::GargoyleSkulls},
-        {MapID::None, GW::EncStrings::UnnaturalSeeds},
-        {MapID::None, GW::EncStrings::SkaleFins},
-        {MapID::None, GW::EncStrings::RedIrisFlowers},
-        {MapID::None, GW::EncStrings::EnchantedLodestones},
-        {MapID::None, GW::EncStrings::SkeletalLimbs},
-        {MapID::None, GW::EncStrings::CharrCarvings},
-        {MapID::None, GW::EncStrings::SpiderLegs},
-        {MapID::None, GW::EncStrings::BakedHusks},
-        {MapID::None, GW::EncStrings::GargoyleSkulls},
-        {MapID::None, GW::EncStrings::UnnaturalSeeds},
-        {MapID::None, GW::EncStrings::IcyLodestones},
-        {MapID::None, GW::EncStrings::GrawlNecklaces},
-        {MapID::None, GW::EncStrings::EnchantedLodestones},
-        {MapID::None, GW::EncStrings::WornBelts},
-        {MapID::None, GW::EncStrings::DullCarapaces},
-        {MapID::None, GW::EncStrings::SpiderLegs},
-        {MapID::None, GW::EncStrings::GargoyleSkulls},
-        {MapID::None, GW::EncStrings::IcyLodestones},
-        {MapID::None, GW::EncStrings::UnnaturalSeeds},
-        {MapID::None, GW::EncStrings::WornBelts},
-        {MapID::None, GW::EncStrings::GrawlNecklaces},
-        {MapID::None, GW::EncStrings::BakedHusks},
-        {MapID::None, GW::EncStrings::SkeletalLimbs},
-        {MapID::None, GW::EncStrings::RedIrisFlowers},
-        {MapID::None, GW::EncStrings::CharrCarvings},
-        {MapID::None, GW::EncStrings::SkaleFins},
-        {MapID::None, GW::EncStrings::DullCarapaces},
-        {MapID::None, GW::EncStrings::EnchantedLodestones},
-        {MapID::None, GW::EncStrings::CharrCarvings},
-        {MapID::None, GW::EncStrings::SpiderLegs},
-        {MapID::None, GW::EncStrings::RedIrisFlowers},
-        {MapID::None, GW::EncStrings::WornBelts},
-        {MapID::None, GW::EncStrings::DullCarapaces}
+        {MapID::None, GW::EncStrings::GrawlNecklaces},      {MapID::None, GW::EncStrings::BakedHusks},     {MapID::None, GW::EncStrings::SkeletalLimbs},       {MapID::None, GW::EncStrings::UnnaturalSeeds},
+        {MapID::None, GW::EncStrings::EnchantedLodestones}, {MapID::None, GW::EncStrings::SkaleFinPreSearing},      {MapID::None, GW::EncStrings::IcyLodestones},       {MapID::None, GW::EncStrings::GargoyleSkulls},
+        {MapID::None, GW::EncStrings::DullCarapaces},       {MapID::None, GW::EncStrings::BakedHusks},     {MapID::None, GW::EncStrings::RedIrisFlowers},      {MapID::None, GW::EncStrings::SpiderLegs},
+        {MapID::None, GW::EncStrings::SkeletalLimbs},       {MapID::None, GW::EncStrings::CharrCarvings},  {MapID::None, GW::EncStrings::EnchantedLodestones}, {MapID::None, GW::EncStrings::GrawlNecklaces},
+        {MapID::None, GW::EncStrings::IcyLodestones},       {MapID::None, GW::EncStrings::WornBelts},      {MapID::None, GW::EncStrings::GargoyleSkulls},      {MapID::None, GW::EncStrings::UnnaturalSeeds},
+        {MapID::None, GW::EncStrings::SkaleFinPreSearing},  {MapID::None, GW::EncStrings::RedIrisFlowers},     {MapID::None, GW::EncStrings::EnchantedLodestones}, {MapID::None, GW::EncStrings::SkeletalLimbs},
+        {MapID::None, GW::EncStrings::CharrCarvings},       {MapID::None, GW::EncStrings::SpiderLegs},     {MapID::None, GW::EncStrings::BakedHusks},          {MapID::None, GW::EncStrings::GargoyleSkulls},
+        {MapID::None, GW::EncStrings::UnnaturalSeeds},      {MapID::None, GW::EncStrings::IcyLodestones},  {MapID::None, GW::EncStrings::GrawlNecklaces},      {MapID::None, GW::EncStrings::EnchantedLodestones},
+        {MapID::None, GW::EncStrings::WornBelts},           {MapID::None, GW::EncStrings::DullCarapaces},  {MapID::None, GW::EncStrings::SpiderLegs},          {MapID::None, GW::EncStrings::GargoyleSkulls},
+        {MapID::None, GW::EncStrings::IcyLodestones},       {MapID::None, GW::EncStrings::UnnaturalSeeds}, {MapID::None, GW::EncStrings::WornBelts},           {MapID::None, GW::EncStrings::GrawlNecklaces},
+        {MapID::None, GW::EncStrings::BakedHusks},          {MapID::None, GW::EncStrings::SkeletalLimbs},  {MapID::None, GW::EncStrings::RedIrisFlowers},      {MapID::None, GW::EncStrings::CharrCarvings},
+        {MapID::None, GW::EncStrings::SkaleFinPreSearing},  {MapID::None, GW::EncStrings::DullCarapaces},      {MapID::None, GW::EncStrings::EnchantedLodestones}, {MapID::None, GW::EncStrings::CharrCarvings},
+        {MapID::None, GW::EncStrings::SpiderLegs},          {MapID::None, GW::EncStrings::RedIrisFlowers}, {MapID::None, GW::EncStrings::WornBelts},           {MapID::None, GW::EncStrings::DullCarapaces}
     };
     static_assert(_countof(nicholas_sandford_cycles) == NICHOLAS_PRE_COUNT);
 
@@ -242,148 +178,146 @@ namespace {
     };
     static_assert(_countof(zaishen_bounty_cycles) == ZAISHEN_BOUNTY_COUNT);
 
-    // These vectors are good to go
-
     std::unordered_map<DailyQuests::NicholasCycleData*, uint16_t> nicholas_item_collected_count;
 
     DailyQuests::NicholasCycleData nicholas_cycles[] = {
-        {GW::EncStrings::RedIrisFlowers, 3, MapID::Regent_Valley},                  // Red Iris Flowers
-        {GW::EncStrings::FeatheredAvicaraScalps, 3, MapID::Mineral_Springs},        // Feathered Avicara Scalps
-        {GW::EncStrings::MargoniteMasks, 2, MapID::Poisoned_Outcrops},              // Margonite Masks
-        {GW::EncStrings::QuetzalCrests, 2, MapID::Alcazia_Tangle},                  // Quetzal Crests
-        {GW::EncStrings::PlagueIdols, 3, MapID::Wajjun_Bazaar},                     // Plague Idols
-        {GW::EncStrings::AzureRemains, 2, MapID::Dreadnoughts_Drift},               // Azure Remains
-        {GW::EncStrings::MandragorRootCake, 1, MapID::Arkjok_Ward},                 // Mandragor Root Cake
-        {GW::EncStrings::MahgoClaw, 1, MapID::Perdition_Rock},                      // Mahgo Claw
-        {L"\x56EF\xD1D8\xC773\x2C26", 5, MapID::Saoshang_Trail},                    // Mantid Pincers
-        {L"\x8101\x43DE\xD124\xA4D9\x7D4A", 3, MapID::Fahranur_The_First_City},     // Sentient Seeds
-        {L"\x8102\x26EA\x8A6F\xD31C\x31DD", 2, MapID::Sacnoth_Valley},              // Stone Grawl Necklaces
-        {L"\x8102\x26D1", 1, MapID::Twin_Serpent_Lakes},                            // Herring
-        {L"\x5702\xA954\x959D\x51B8", 3, MapID::Mount_Qinkai},                      // Naga Skins
-        {L"\x296A", 1, MapID::The_Falls},                                           // Gloom Seed
-        {L"\x2882", 1, MapID::The_Breach},                                          // Charr Hide
-        {L"\x8101\x43F3\xF5F8\xC245\x41F2", 1, MapID::The_Alkali_Pan},              // Ruby Djinn Essence
-        {L"\x2930", 2, MapID::Majestys_Rest},                                       // Thorny Carapaces
-        {L"\x56DD\xC82C\xB7E0\x3EB9", 3, MapID::Rheas_Crater},                      // Bone Charms
-        {L"\x8102\x26E0\xA884\xE2D3\x7E01", 3, MapID::Varajar_Fells},               // Modniir Manes
-        {L"\x8102\x26E9\x96D3\x8E81\x64D1", 3, MapID::Dalada_Uplands},              // Superb Charr Carvings
-        {L"\x22EE\xF65A\x86E6\x1C6C", 5, MapID::Zen_Daijun_explorable},             // Rolls of Parchment
-        {L"\x8101\x5208\xA22C\xC074\x2373", 2, MapID::Garden_of_Seborhin},          // Roaring Ether Claws
-        {L"\x8101\x5721", 3, MapID::Bukdek_Byway},                                  // Branches of Juni Berries
-        {L"\x2945", 3, MapID::Deldrimor_Bowl},                                      // Shiverpeak Manes
-        {L"\x293C", 3, MapID::Eastern_Frontier},                                    // Fetid Carapaces
-        {L"\x6CCD\xC6FD\xA37B\x3529", 2, MapID::Gyala_Hatchery},                    // Moon Shells
-        {L"\x2921", 1, MapID::The_Arid_Sea},                                        // Massive Jawbone
-        {L"\x8102\x26FA\x8E00\xEA86\x3A1D", 1, MapID::Ice_Cliff_Chasms},            // Chromatic Scale
-        {L"\x292B", 3, MapID::Ice_Floe},                                            // Mursaat Tokens
-        {L"\x8101\x43FA\xA429\xC255\x23C4", 1, MapID::Bahdok_Caverns},              // Sentient Lodestone
-        {L"\x2934", 3, MapID::Tangle_Root},                                         // Jungle Troll Tusks
-        {L"\x8101\x57DD\xF97D\xB5AD\x21FF", 1, MapID::Resplendent_Makuun},          // Sapphire Djinn Essence
-        {L"\x56E6\xB928\x9FA2\x43E1", 1, MapID::Arborstone_explorable},             // Stone Carving
-        {L"\x2919", 3, MapID::North_Kryta_Province},                                // Feathered Caromi Scalps
-        {L"\x8101\x52EE\xBF76\xE319\x2B39", 1, MapID::Holdings_of_Chokhin},         // Pillaged Goods
-        {L"\x56D5\x8B0F\xAB5B\x8A6", 1, MapID::Haiju_Lagoon},                       // Gold Crimson Skull Coin
-        {L"\x56D7\xDD87\x8A67\x167D", 3, MapID::Tahnnakai_Temple_explorable},       // Jade Bracelets
-        {L"\x2924", 2, MapID::Prophets_Path},                                       // Minotaur Horns
-        {L"\x294A", 2, MapID::Snake_Dance},                                         // Frosted Griffon Wings
-        {L"\x8101\x43E6\xBE4C\xE956\x780", 2, MapID::Mehtani_Keys},                 // Silver Bullion Coins
-        {L"\x56DF\xFEE4\xCA2D\x27A", 1, MapID::Morostav_Trail},                     // Truffle
-        {L"\x8102\x26DD\x85C5\xD98F\x5CCB", 3, MapID::Verdant_Cascades},            // Skelk Claws
-        {L"\x2923", 2, MapID::The_Scar},                                            // Dessicated Hydra Claws
-        {L"\x294B", 3, MapID::Spearhead_Peak},                                      // Frigid Hearts
-        {L"\x570A\x9453\x84A6\x64D4", 3, MapID::Nahpui_Quarter_explorable},         // Celestial Essences
-        {L"\x2937", 1, MapID::Lornars_Pass},                                        // Phantom Residue
-        {L"\x8101\x42D1\xFB15\xD39E\x5A26", 1, MapID::Issnur_Isles},                // Drake Kabob
-        {L"\x55D0\xF8B7\xB108\x6018", 3, MapID::Ferndale},                          // Amber Chunks
-        {L"\x2914", 2, MapID::Stingray_Strand},                                     // Glowing Hearts
-        {L"\x8102\x26D8\xB5B9\x9AF6\x42D6", 5, MapID::Riven_Earth},                 // Saurian Bones
-        {L"\x8101\x5207\xEBD7\xB733\x2E27", 2, MapID::Wilderness_of_Bahdza},        // Behemoth Hides
-        {L"\x8101\x4E35\xD63F\xCAB4\xDD1", 1, MapID::Crystal_Overlook},             // Luminous Stone
-        {L"\x2950", 3, MapID::Witmans_Folly},                                       // Intricate Grawl Necklaces
-        {L"\x55D1\xD189\x845A\x7164", 3, MapID::Shadows_Passage},                   // Jadeite Shards
-        {L"\x8101\x43E5\xA891\xA83A\x426D", 1, MapID::Barbarous_Shore},             // Gold Doubloon
-        {L"\x291B", 2, MapID::Skyward_Reach},                                       // Shriveled Eyes
-        {L"\x28EF", 2, MapID::Icedome},                                             // Icy Lodestones
-        {L"\x5701\xD258\xC958\x506F", 1, MapID::Silent_Surf},                       // Keen Oni Talon
-        {L"\x2910", 2, MapID::Nebo_Terrace},                                        // Hardened Humps
-        {L"\x8102\x26E7\xC330\xC111\x4058", 2, MapID::Drakkar_Lake},                // Piles of Elemental Dust
-        {L"\x56F2\x876E\xEACB\x730", 3, MapID::Panjiang_Peninsula},                 // Naga Hides
-        {L"\x22F3\xA11C\xC924\x5E15", 3, MapID::Griffons_Mouth},                    // Spiritwood Planks
-        {L"\x293A", 1, MapID::Pockmark_Flats},                                      // Stormy Eye
-        {L"\x8101\x43F0\xFF3B\x8E3E\x20B1", 3, MapID::Forum_Highlands},             // Skree Wings
-        {L"\x5706\xC61F\xF23D\x3C4", 3, MapID::Raisu_Palace},                       // Soul Stones
-        {L"\x290F", 1, MapID::Tears_of_the_Fallen},                                 // Spiked Crest
-        {L"\x56E5\x922D\xCF17\x7258", 1, MapID::Drazach_Thicket},                   // Dragon Root
-        {L"\x8102\x26E3\xB76F\xE56C\x1A2", 3, MapID::Jaga_Moraine},                 // Berserker Horns
-        {L"\x292E", 1, MapID::Mamnoon_Lagoon},                                      // Behemoth Jaw
-        {L"\x8101\x42D2\xE08B\xB81A\x604", 1, MapID::Zehlon_Reach},                 // Bowl of Skalefin Soup
-        {L"\x2915", 2, MapID::Kessex_Peak},                                         // Forest Minotaur Horns
-        {L"\x56ED\xE607\x9B27\x7299", 3, MapID::Sunjiang_District_explorable},      // Putrid Cysts
-        {L"\x2926", 2, MapID::Salt_Flats},                                          // Jade Mandibles
-        {L"\x292F", 2, MapID::Silverwood},                                          // Maguuma Manes
-        {L"\x56E0\xFBEB\xA429\x7B5", 1, MapID::The_Eternal_Grove},                  // Skull Juju
-        {L"\x8101\x5840\xB4F5\xB2A7\x5E0F", 3, MapID::Lahtenda_Bog},                // Mandragor Swamproots
-        {L"\x8101\x52EA", 1, MapID::Vehtendi_Valley},                               // Bottle of Vabbian Wine
-        {L"\x8102\x26DA\x950E\x82F1\xA3D", 2, MapID::Magus_Stones},                 // Weaver Legs
-        {L"\x291F", 1, MapID::Diviners_Ascent},                                     // Topaz Crest
-        {L"\x56FC\xD503\x9D77\x730C", 2, MapID::Pongmei_Valley},                    // Rot Wallow Tusks
-        {L"\x2946", 2, MapID::Anvil_Rock},                                          // Frostfire Fangs
-        {L"\x8101\x43E7\xD854\xC981\x54DD", 1, MapID::The_Ruptured_Heart},          // Demonic Relic
-        {L"\x2917", 2, MapID::Talmark_Wilderness},                                  // Abnormal Seeds
-        {L"\x8101\x43EA\xE72E\xAA23\x3C54", 1, MapID::The_Hidden_City_of_Ahdashim}, // Diamond Djinn Essence
-        {L"\x2928", 2, MapID::Vulture_Drifts},                                      // Forgotten Seals
-        {L"\x56D4\x8663\xA244\x50F5", 5, MapID::Kinya_Province},                    // Copper Crimson Skull Coins
-        {L"\x2932", 3, MapID::Ettins_Back},                                         // Mossy Mandibles
-        {L"\x2954", 2, MapID::Grenths_Footprint},                                   // Enslavement Stones
-        {L"\x22E6\xE8F4\xA898\x75CB", 5, MapID::Jahai_Bluffs},                      // Elonian Leather Squares
-        {L"\x8101\x43EC\x8335\xBAA8\x153C", 2, MapID::Vehjin_Mines},                // Cobalt Talons
-        {L"\x288C", 1, MapID::Reed_Bog},                                            // Maguuma Spider Web
-        {L"\x56EB\xB8B7\xF734\x2985", 5, MapID::Minister_Chos_Estate_explorable},   // Forgotten Trinket Boxes
-        {L"\x2947", 3, MapID::Iron_Horse_Mine},                                     // Icy Humps
-        {L"\x8101\x43D2\x8CB3\xFC99\x602F", 1, MapID::The_Shattered_Ravines},       // Sandblasted Lodestone
-        {L"\x56FB\xA16B\x9DAD\x62B6", 3, MapID::Archipelagos},                      // Black Pearls
-        {L"\x8101\x43F7\xFD85\x9D52\x6DFA", 3, MapID::Marga_Coast},                 // Insect Carapaces
-        {L"\x2911", 3, MapID::Watchtower_Coast},                                    // Mergoyle Skulls
-        {L"\x2957", 3, MapID::Cursed_Lands},                                        // Decayed Orr Emblems
-        {L"\x22E2\xCE9B\x8771\x7DC7", 5, MapID::Mourning_Veil_Falls},               // Tempered Glass Vials
-        {L"\x2943", 3, MapID::Old_Ascalon},                                         // Scorched Lodestones
-        {L"\x8101\x583C\xD7B3\xDD92\x598F", 1, MapID::Turais_Procession},           // Water Djinn Essence
-        {L"\x5703\xE1CC\xFE29\x4525", 1, MapID::Maishang_Hills},                    // Guardian Moss
-        {L"\x22C1", 6, MapID::The_Floodplain_of_Mahnkelon},                         // Dwarven Ales
-        {L"\x8102\x26D9\xABE9\x9082\x4999", 2, MapID::Sparkfly_Swamp},              // Amphibian Tongues
-        {L"\x294E", 2, MapID::Frozen_Forest},                                       // Alpine Seeds
-        {L"\x2931", 2, MapID::Dry_Top},                                             // Tangled Seeds
-        {L"\x56FA\xE3AB\xA19E\x5D6A", 3, MapID::Jaya_Bluffs},                       // Stolen Supplies
-        {L"\x8101\x42D3\xD9E7\xD4E3\x259E", 1, MapID::Plains_of_Jarin},             // Pahnai Salad
-        {L"\x5707\xF70E\xCAA2\x5CC5", 3, MapID::Xaquang_Skyway},                    // Vermin Hides
-        {L"\x8101\x52ED\x86E9\xCEF3\x69D3", 1, MapID::The_Mirror_of_Lyss},          // Roaring Ether Heart
-        {L"\x2941", 3, MapID::Ascalon_Foothills},                                   // Leathery Claws
-        {L"\x56FE\xF2B0\x8B62\x116A", 1, MapID::Unwaking_Waters},                   // Azure Crest
-        {L"\x8102\x26E2\xC8E7\x8B1F\x716A", 1, MapID::Bjora_Marches},               // Jotun Pelt
-        {L"\x8101\x583E\xE3F5\x87A2\x194F", 2, MapID::Dejarin_Estate},              // Heket Tongues
-        {L"\x2951", 5, MapID::Talus_Chute},                                         // Mountain Troll Tusks
-        {L"\x22E7\xC1DA\xF2C1\x452A", 3, MapID::Shenzun_Tunnels},                   // Vials of Ink
-        {L"\x8101\x43E9\xDBD0\xA0C6\x4AF1", 3, MapID::Gandara_the_Moon_Fortress},   // Kournan Pendants
-        {L"\x293D", 3, MapID::Diessa_Lowlands},                                     // Singed Gargoyle Skulls
-        {L"\x56E4\xDF8C\xAD76\x3958", 3, MapID::Melandrus_Hope},                    // Dredge Incisors
-        {L"\x2955", 3, MapID::Tascas_Demise},                                       // Stone Summit Badges
-        {L"\x8102\x26F4\xE764\xC908\x52E2", 3, MapID::Arbor_Bay},                   // Krait Skins
-        {L"\x8101\x43D0\x843D\x98D1\x775C", 2, MapID::Jokos_Domain},                // Inscribed Shards
-        {L"\x56F6\xB464\x9A9E\x11EF", 3, MapID::Sunqua_Vale},                       // Feathered Scalps
-        {L"\x8101\x43EB\xF92D\xD469\x73A8", 3, MapID::The_Sulfurous_Wastes},        // Mummy Wrappings
-        {L"\x2916", 2, MapID::The_Black_Curtain},                                   // Shadowy Remnants
-        {L"\x570B\xFE7B\xBD8A\x7CF4", 3, MapID::The_Undercity},                     // Ancient Kappa Shells
-        {L"\x8101\x5206\x8286\xFEFA\x191C", 1, MapID::Yatendi_Canyons},             // Geode
-        {L"\x8102\x26E8\xC0DB\xD26E\x4711", 2, MapID::Grothmar_Wardowns},           // Fibrous Mandragor Roots
-        {L"\x293F", 3, MapID::Dragons_Gullet},                                      // Gruesome Ribcages
-        {L"\x56FD\xC65F\xF6F1\x26B4", 2, MapID::Boreas_Seabed_explorable},          // Kraken Eyes
-        {L"\x2918", 3, MapID::Scoundrels_Rise},                                     // Bog Skale Fins
-        {L"\x8101\x583D\xB904\xF476\x59A7", 2, MapID::Sunward_Marches},             // Sentient Spores
-        {L"\x292D", 2, MapID::Sage_Lands},                                          // Ancient Eyes
-        {L"\x8101\x43E4\x8D6E\x83E5\x4C07", 3, MapID::Cliffs_of_Dohjok},            // Copper Shillings
-        {L"\x8102\x26DF\xF8E8\x8ACB\x58B4", 3, MapID::Norrhart_Domains},            // Frigid Mandragor Husks
-        {L"\x22D5\x8371\x8ED5\x56B4", 3, MapID::Travelers_Vale},                    // Bolts of Linen
-        {L"\x28EE", 3, MapID::Flame_Temple_Corridor},                               // Charr Carvings
+        {GW::EncStrings::RedIrisFlowers, 3, MapID::Regent_Valley},
+        {GW::EncStrings::FeatheredAvicaraScalps, 3, MapID::Mineral_Springs},
+        {GW::EncStrings::MargoniteMasks, 2, MapID::Poisoned_Outcrops},
+        {GW::EncStrings::QuetzalCrests, 2, MapID::Alcazia_Tangle},
+        {GW::EncStrings::PlagueIdols, 3, MapID::Wajjun_Bazaar},
+        {GW::EncStrings::AzureRemains, 2, MapID::Dreadnoughts_Drift},
+        {GW::EncStrings::MandragorRootCake, 1, MapID::Arkjok_Ward},
+        {GW::EncStrings::MahgoClaw, 1, MapID::Perdition_Rock},
+        {GW::EncStrings::MantidPincers, 5, MapID::Saoshang_Trail},
+        {GW::EncStrings::SentientSeeds, 3, MapID::Fahranur_The_First_City},
+        {GW::EncStrings::StoneGrawlNecklaces, 2, MapID::Sacnoth_Valley},
+        {GW::EncStrings::Herring, 1, MapID::Twin_Serpent_Lakes},
+        {GW::EncStrings::NagaSkins, 3, MapID::Mount_Qinkai},
+        {GW::EncStrings::GloomSeed, 1, MapID::The_Falls},
+        {GW::EncStrings::CharrHide, 1, MapID::The_Breach},
+        {GW::EncStrings::RubyDjinnEssence, 1, MapID::The_Alkali_Pan},
+        {GW::EncStrings::ThornyCarapaces, 2, MapID::Majestys_Rest},
+        {GW::EncStrings::BoneCharms, 3, MapID::Rheas_Crater},
+        {GW::EncStrings::ModniirManes, 3, MapID::Varajar_Fells},
+        {GW::EncStrings::SuperbCharrCarvings, 3, MapID::Dalada_Uplands},
+        {GW::EncStrings::RollsofParchment, 5, MapID::Zen_Daijun_explorable},
+        {GW::EncStrings::RoaringEtherClaws, 2, MapID::Garden_of_Seborhin},
+        {GW::EncStrings::BranchesofJuniBerries, 3, MapID::Bukdek_Byway},
+        {GW::EncStrings::ShiverpeakManes, 3, MapID::Deldrimor_Bowl},
+        {GW::EncStrings::FetidCarapaces, 3, MapID::Eastern_Frontier},
+        {GW::EncStrings::MoonShells, 2, MapID::Gyala_Hatchery},
+        {GW::EncStrings::MassiveJawbone, 1, MapID::The_Arid_Sea},
+        {GW::EncStrings::ChromaticScale, 1, MapID::Ice_Cliff_Chasms},
+        {GW::EncStrings::MursaatTokens, 3, MapID::Ice_Floe},
+        {GW::EncStrings::SentientLodestone, 1, MapID::Bahdok_Caverns},
+        {GW::EncStrings::JungleTrollTusks, 3, MapID::Tangle_Root},
+        {GW::EncStrings::SapphireDjinnEssence, 1, MapID::Resplendent_Makuun},
+        {GW::EncStrings::StoneCarving, 1, MapID::Arborstone_explorable},
+        {GW::EncStrings::FeatheredCaromiScalps, 3, MapID::North_Kryta_Province},
+        {GW::EncStrings::PillagedGoods, 1, MapID::Holdings_of_Chokhin},
+        {GW::EncStrings::GoldCrimsonSkullCoin, 1, MapID::Haiju_Lagoon},
+        {GW::EncStrings::JadeBracelets, 3, MapID::Tahnnakai_Temple_explorable},
+        {GW::EncStrings::MinotaurHorns, 2, MapID::Prophets_Path},
+        {GW::EncStrings::FrostedGriffonWings, 2, MapID::Snake_Dance},
+        {GW::EncStrings::SilverBullionCoins, 2, MapID::Mehtani_Keys},
+        {GW::EncStrings::Truffle, 1, MapID::Morostav_Trail},
+        {GW::EncStrings::SkelkClaws, 3, MapID::Verdant_Cascades},
+        {GW::EncStrings::DessicatedHydraClaws, 2, MapID::The_Scar},
+        {GW::EncStrings::FrigidHearts, 3, MapID::Spearhead_Peak},
+        {GW::EncStrings::CelestialEssences, 3, MapID::Nahpui_Quarter_explorable},
+        {GW::EncStrings::PhantomResidue, 1, MapID::Lornars_Pass},
+        {GW::EncStrings::DrakeKabob, 1, MapID::Issnur_Isles},
+        {GW::EncStrings::AmberChunks, 3, MapID::Ferndale},
+        {GW::EncStrings::GlowingHearts, 2, MapID::Stingray_Strand},
+        {GW::EncStrings::SaurianBones, 5, MapID::Riven_Earth},
+        {GW::EncStrings::BehemothHides, 2, MapID::Wilderness_of_Bahdza},
+        {GW::EncStrings::LuminousStone, 1, MapID::Crystal_Overlook},
+        {GW::EncStrings::IntricateGrawlNecklaces, 3, MapID::Witmans_Folly},
+        {GW::EncStrings::JadeiteShards, 3, MapID::Shadows_Passage},
+        {GW::EncStrings::GoldDoubloon, 1, MapID::Barbarous_Shore},
+        {GW::EncStrings::ShriveledEyes, 2, MapID::Skyward_Reach},
+        {GW::EncStrings::IcyLodestones, 2, MapID::Icedome},
+        {GW::EncStrings::KeenOniTalon, 1, MapID::Silent_Surf},
+        {GW::EncStrings::HardenedHumps, 2, MapID::Nebo_Terrace},
+        {GW::EncStrings::PilesofElementalDust, 2, MapID::Drakkar_Lake},
+        {GW::EncStrings::NagaHides, 3, MapID::Panjiang_Peninsula},
+        {GW::EncStrings::SpiritwoodPlanks, 3, MapID::Griffons_Mouth},
+        {GW::EncStrings::StormyEye, 1, MapID::Pockmark_Flats},
+        {GW::EncStrings::SkreeWings, 3, MapID::Forum_Highlands},
+        {GW::EncStrings::SoulStones, 3, MapID::Raisu_Palace},
+        {GW::EncStrings::SpikedCrest, 1, MapID::Tears_of_the_Fallen},
+        {GW::EncStrings::DragonRoot, 1, MapID::Drazach_Thicket},
+        {GW::EncStrings::BerserkerHorns, 3, MapID::Jaga_Moraine},
+        {GW::EncStrings::BehemothJaw, 1, MapID::Mamnoon_Lagoon},
+        {GW::EncStrings::BowlofSkalefinSoup, 1, MapID::Zehlon_Reach},
+        {GW::EncStrings::ForestMinotaurHorns, 2, MapID::Kessex_Peak},
+        {GW::EncStrings::PutridCysts, 3, MapID::Sunjiang_District_explorable},
+        {GW::EncStrings::JadeMandibles, 2, MapID::Salt_Flats},
+        {GW::EncStrings::MaguumaManes, 2, MapID::Silverwood},
+        {GW::EncStrings::SkullJuju, 1, MapID::The_Eternal_Grove},
+        {GW::EncStrings::MandragorSwamproots, 3, MapID::Lahtenda_Bog},
+        {GW::EncStrings::BottleofVabbianWine, 1, MapID::Vehtendi_Valley},
+        {GW::EncStrings::WeaverLegs, 2, MapID::Magus_Stones},
+        {GW::EncStrings::TopazCrest, 1, MapID::Diviners_Ascent},
+        {GW::EncStrings::RotWallowTusks, 2, MapID::Pongmei_Valley},
+        {GW::EncStrings::FrostfireFangs, 2, MapID::Anvil_Rock},
+        {GW::EncStrings::DemonicRelic, 1, MapID::The_Ruptured_Heart},
+        {GW::EncStrings::AbnormalSeeds, 2, MapID::Talmark_Wilderness},
+        {GW::EncStrings::DiamondDjinnEssence, 1, MapID::The_Hidden_City_of_Ahdashim},
+        {GW::EncStrings::ForgottenSeals, 2, MapID::Vulture_Drifts},
+        {GW::EncStrings::CopperCrimsonSkullCoins, 5, MapID::Kinya_Province},
+        {GW::EncStrings::MossyMandibles, 3, MapID::Ettins_Back},
+        {GW::EncStrings::EnslavementStones, 2, MapID::Grenths_Footprint},
+        {GW::EncStrings::ElonianLeatherSquares, 5, MapID::Jahai_Bluffs},
+        {GW::EncStrings::CobaltTalons, 2, MapID::Vehjin_Mines},
+        {GW::EncStrings::MaguumaSpiderWeb, 1, MapID::Reed_Bog},
+        {GW::EncStrings::ForgottenTrinketBoxes, 5, MapID::Minister_Chos_Estate_explorable},
+        {GW::EncStrings::IcyHumps, 3, MapID::Iron_Horse_Mine},
+        {GW::EncStrings::SandblastedLodestone, 1, MapID::The_Shattered_Ravines},
+        {GW::EncStrings::BlackPearls, 3, MapID::Archipelagos},
+        {GW::EncStrings::InsectCarapaces, 3, MapID::Marga_Coast},
+        {GW::EncStrings::MergoyleSkulls, 3, MapID::Watchtower_Coast},
+        {GW::EncStrings::DecayedOrrEmblems, 3, MapID::Cursed_Lands},
+        {GW::EncStrings::TemperedGlassVials, 5, MapID::Mourning_Veil_Falls},
+        {GW::EncStrings::ScorchedLodestones, 3, MapID::Old_Ascalon},
+        {GW::EncStrings::WaterDjinnEssence, 1, MapID::Turais_Procession},
+        {GW::EncStrings::GuardianMoss, 1, MapID::Maishang_Hills},
+        {GW::EncStrings::DwarvenAles, 6, MapID::The_Floodplain_of_Mahnkelon},
+        {GW::EncStrings::AmphibianTongues, 2, MapID::Sparkfly_Swamp},
+        {GW::EncStrings::AlpineSeeds, 2, MapID::Frozen_Forest},
+        {GW::EncStrings::TangledSeeds, 2, MapID::Dry_Top},
+        {GW::EncStrings::StolenSupplies, 3, MapID::Jaya_Bluffs},
+        {GW::EncStrings::PahnaiSalad, 1, MapID::Plains_of_Jarin},
+        {GW::EncStrings::VerminHides, 3, MapID::Xaquang_Skyway},
+        {GW::EncStrings::RoaringEtherHeart, 1, MapID::The_Mirror_of_Lyss},
+        {GW::EncStrings::LeatheryClaws, 3, MapID::Ascalon_Foothills},
+        {GW::EncStrings::AzureCrest, 1, MapID::Unwaking_Waters},
+        {GW::EncStrings::JotunPelt, 1, MapID::Bjora_Marches},
+        {GW::EncStrings::HeketTongues, 2, MapID::Dejarin_Estate},
+        {GW::EncStrings::MountainTrollTusks, 5, MapID::Talus_Chute},
+        {GW::EncStrings::VialsofInk, 3, MapID::Shenzun_Tunnels},
+        {GW::EncStrings::KournanPendants, 3, MapID::Gandara_the_Moon_Fortress},
+        {GW::EncStrings::SingedGargoyleSkulls, 3, MapID::Diessa_Lowlands},
+        {GW::EncStrings::DredgeIncisors, 3, MapID::Melandrus_Hope},
+        {GW::EncStrings::StoneSummitBadges, 3, MapID::Tascas_Demise},
+        {GW::EncStrings::KraitSkins, 3, MapID::Arbor_Bay},
+        {GW::EncStrings::InscribedShards, 2, MapID::Jokos_Domain},
+        {GW::EncStrings::FeatheredScalps, 3, MapID::Sunqua_Vale},
+        {GW::EncStrings::MummyWrappings, 3, MapID::The_Sulfurous_Wastes},
+        {GW::EncStrings::ShadowyRemnants, 2, MapID::The_Black_Curtain},
+        {GW::EncStrings::AncientKappaShells, 3, MapID::The_Undercity},
+        {GW::EncStrings::Geode, 1, MapID::Yatendi_Canyons},
+        {GW::EncStrings::FibrousMandragorRoots, 2, MapID::Grothmar_Wardowns},
+        {GW::EncStrings::GruesomeRibcages, 3, MapID::Dragons_Gullet},
+        {GW::EncStrings::KrakenEyes, 2, MapID::Boreas_Seabed_explorable},
+        {GW::EncStrings::BogSkaleFins, 3, MapID::Scoundrels_Rise},
+        {GW::EncStrings::SentientSpores, 2, MapID::Sunward_Marches},
+        {GW::EncStrings::AncientEyes, 2, MapID::Sage_Lands},
+        {GW::EncStrings::CopperShillings, 3, MapID::Cliffs_of_Dohjok},
+        {GW::EncStrings::FrigidMandragorHusks, 3, MapID::Norrhart_Domains},
+        {GW::EncStrings::BoltsofLinen, 3, MapID::Travelers_Vale},
+        {GW::EncStrings::CharrCarvings, 3, MapID::Flame_Temple_Corridor},
     };
     static_assert(_countof(nicholas_cycles) == NICHOLAS_POST_COUNT);
 
@@ -632,27 +566,13 @@ namespace {
     };
     static_assert(_countof(zaishen_mission_cycles) == ZAISHEN_MISSION_COUNT);
 
-    DailyQuests::QuestData pve_weekly_bonus_cycles[] = {
-        {MapID::None, GW::EncStrings::ExtraLuckBonus},
-        {MapID::None, GW::EncStrings::ElonianSupportBonus},
-        {MapID::None, GW::EncStrings::ZaishenBountyBonus},
-        {MapID::None, GW::EncStrings::FactionsEliteBonus},
-        {MapID::None, GW::EncStrings::NorthernSupportBonus},
-        {MapID::None, GW::EncStrings::ZaishenMissionBonus},
-        {MapID::None, GW::EncStrings::PantheonBonus},
-        {MapID::None, GW::EncStrings::FactionSupportBonus},
-        {MapID::None, GW::EncStrings::ZaishenVanquishingBonus}
-    };
+    DailyQuests::QuestData pve_weekly_bonus_cycles[] = {{MapID::None, GW::EncStrings::ExtraLuckBonus},     {MapID::None, GW::EncStrings::ElonianSupportBonus},  {MapID::None, GW::EncStrings::ZaishenBountyBonus},
+                                                        {MapID::None, GW::EncStrings::FactionsEliteBonus}, {MapID::None, GW::EncStrings::NorthernSupportBonus}, {MapID::None, GW::EncStrings::ZaishenMissionBonus},
+                                                        {MapID::None, GW::EncStrings::PantheonBonus},      {MapID::None, GW::EncStrings::FactionSupportBonus},  {MapID::None, GW::EncStrings::ZaishenVanquishingBonus}};
     static_assert(_countof(pve_weekly_bonus_cycles) == WEEKLY_BONUS_PVE_COUNT);
 
-    DailyQuests::QuestData pvp_weekly_bonus_cycles[] = {
-        {MapID::None, GW::EncStrings::RandomArenasBonus},
-        {MapID::None, GW::EncStrings::GuildVersusGuildBonus},
-        {MapID::None, GW::EncStrings::CompetitiveMissionBonus},
-        {MapID::None, GW::EncStrings::HeroesAscentBonus},
-        {MapID::None, GW::EncStrings::CodexArenaBonus},
-        {MapID::None, GW::EncStrings::AllianceBattleBonus}
-    };
+    DailyQuests::QuestData pvp_weekly_bonus_cycles[] = {{MapID::None, GW::EncStrings::RandomArenasBonus}, {MapID::None, GW::EncStrings::GuildVersusGuildBonus}, {MapID::None, GW::EncStrings::CompetitiveMissionBonus},
+                                                        {MapID::None, GW::EncStrings::HeroesAscentBonus}, {MapID::None, GW::EncStrings::CodexArenaBonus},       {MapID::None, GW::EncStrings::AllianceBattleBonus}};
     static_assert(_countof(pvp_weekly_bonus_cycles) == WEEKLY_BONUS_PVP_COUNT);
 
     uint32_t GetZaishenBountyIdx(const time_t* unix)
@@ -710,6 +630,12 @@ namespace {
         return static_cast<time_t>(floor((*unix - 1368457200) / SECONDSINAWEEK) * SECONDSINAWEEK) + 1368457200;
     }
 
+    // Returns the start of the next rotation period after `unix`, given the cycle's epoch and period length.
+    time_t GetNextRotationTime(const time_t unix, const time_t epoch, const time_t period)
+    {
+        return epoch + (((unix - epoch) / period) + 1) * period;
+    }
+
     uint32_t GetWeeklyPvEBonusIdx(const time_t* unix)
     {
         return static_cast<uint32_t>((GetWeeklyRotationTime(unix) - 1368457200) / SECONDSINAWEEK % WEEKLY_BONUS_PVE_COUNT);
@@ -752,15 +678,8 @@ namespace {
     bool subscribed_vanguard[VANGUARD_COUNT] = {false};
     bool subscribed_nicholas_sandford[NICHOLAS_PRE_COUNT] = {false};
 
-    bool show_zaishen_bounty_in_window = true;
-    bool show_zaishen_combat_in_window = true;
-    bool show_zaishen_missions_in_window = true;
-    bool show_zaishen_vanquishes_in_window = true;
-    bool show_wanted_quests_in_window = true;
-    bool show_nicholas_in_window = true;
-    bool show_weekly_bonus_pve_in_window = true;
-    bool show_weekly_bonus_pvp_in_window = true;
-    bool show_presearing_dailies_in_window = false;
+    DailyQuests::Settings settings;
+    bool pending_zaishen_mission_check = false;
 
     uint32_t subscriptions_lookahead_days = 7;
 
@@ -782,50 +701,32 @@ namespace {
 
     GW::HookEntry ChatCmd_HookEntry;
 
-
-    bool GetIsPreSearing()
+    // rollover: the timestamp when this quest will be replaced by the next one.
+    // Pass 0 to indicate the current quest (no date shown).
+    void PrintDaily(const wchar_t* quest_type_enc, const wchar_t* quest_name_enc, const time_t rollover)
     {
-        const GW::AreaInfo* i = GW::Map::GetCurrentMapInfo();
-        return i && i->region == GW::Region::Region_Presearing;
-    }
-
-    const wchar_t* DateString(const time_t* unix)
-    {
-        const std::tm* now = std::localtime(unix);
-        static wchar_t buf[12];
-        swprintf(buf, sizeof(buf), L"%d-%02d-%02d", now->tm_year + 1900, now->tm_mon + 1, now->tm_mday);
-        return buf;
-    }
-
-    void PrintDaily(const wchar_t* quest_type_enc, const wchar_t* quest_name_enc, const time_t unix, const bool as_wiki_link = true)
-    {
-        const bool show_date = unix != time(nullptr);
         std::wstring to_send;
-        std::wstring quest_name_as_link = quest_name_enc;
-        if (as_wiki_link) {
-            quest_name_as_link = std::format(L"\x108\x107<a=1>\x200B\x1\x2{}\x2\x108\x107</a>\x1", quest_name_enc);
-        }
-        if (show_date) {
-            to_send = std::format(L"{}\x2\x108\x107, {}: \x1\x2{}", quest_type_enc, DateString(&unix), quest_name_as_link);
+        std::wstring quest_name_as_link = std::format(L"\x108\x107[\x1\x2{}\x2\x108\x107;wiki:\x1\x2{}\x2\x108\x107]\x1", quest_name_enc, quest_name_enc);
+        std::wstring quest_type_as_link = std::format(L"\x108\x107[\x1\x2{}\x2\x108\x107;wiki:\x1\x2{}\x2\x108\x107]\x1", quest_type_enc, quest_type_enc);
+        if (rollover) {
+            to_send += std::format(L"\x108\x107<quote>\x1\x2{}\x2\x108\x107, {} @ {}: \x1\x2{}", quest_type_as_link, TextUtils::RelativeTimeW(rollover), TextUtils::StringToWString(TextUtils::TimeToString(rollover)), quest_name_as_link);
         }
         else {
-            to_send = std::format(L"{}\x2\x108\x107: \x1\x2{}", quest_type_enc, quest_name_as_link);
+            to_send += std::format(L"\x108\x107<quote>\x1\x2{}\x2\x108\x107: \x1\x2{}", quest_type_as_link, quest_name_as_link);
         }
         WriteChatEnc(GW::Chat::Channel::CHANNEL_GLOBAL, to_send.c_str(), nullptr, true);
     }
 
-    void CmdDaily(const wchar_t* quest_type, const std::function<DailyQuests::QuestData*(time_t)>& get_quest_func, int argc, const LPWSTR* argv)
+    void CmdDaily(const wchar_t* quest_type, const std::function<DailyQuests::DailyQuestResult(time_t)>& get_quest_func, int argc, const LPWSTR* argv)
     {
-        time_t now = time(nullptr);
-        if (argc > 1 && !wcscmp(argv[1], L"tomorrow")) {
-            now += 86400;
-        }
-        const auto quest = get_quest_func(now);
+        const time_t now = time(nullptr);
+        const bool is_tomorrow = argc > 1 && !wcscmp(argv[1], L"tomorrow");
+        const auto [quest, rollover] = get_quest_func(is_tomorrow ? now + 86400 : now);
         if (argc > 1 && (wcscmp(argv[1], L"take") == 0 || wcscmp(argv[1], L"travel") == 0) && quest->GetQuestGiverOutpost() != MapID::None) {
             pending_quest_take = quest;
             return;
         }
-        PrintDaily(quest_type, quest->GetQuestNameEnc(), now);
+        PrintDaily(quest_type, quest->GetQuestNameEnc(), is_tomorrow ? rollover : 0);
     }
 
     void CHAT_CMD_FUNC(CmdWeeklyBonus)
@@ -866,44 +767,36 @@ namespace {
 
     void CHAT_CMD_FUNC(CmdNicholas)
     {
-        time_t now = time(nullptr);
-        if (argc > 1 && !wcscmp(argv[1], L"tomorrow")) {
-            now += 86400;
-        }
+        const time_t now = time(nullptr);
+        const bool is_tomorrow = argc > 1 && !wcscmp(argv[1], L"tomorrow");
+        const time_t query_time = is_tomorrow ? now + 86400 : now;
         std::wstring buf;
 
-        if (GetIsPreSearing()) {
-            buf = std::format(L"\x108\x107{} \x1\x2{}", 5, DailyQuests::GetNicholasSandford(now)->GetQuestNameEnc());
-
-            PrintDaily(L"\x108\x107Nicholas Sandford\x1", buf.c_str(), now, false);
+        if (GW::Map::IsPreSearing()) {
+            const auto [quest, rollover] = DailyQuests::GetNicholasSandford(query_time);
+            buf = std::format(L"\x108\x107{} \x1\x2{}", 5, quest->GetQuestNameEnc());
+            PrintDaily(L"\x108\x107Nicholas Sandford\x1", buf.c_str(), is_tomorrow ? rollover : 0);
         }
         else {
-            const auto nick = DailyQuests::GetNicholasTheTraveller(now);
+            const auto [nick, rollover] = DailyQuests::GetNicholasTheTraveller(query_time);
             buf = std::format(L"{}\x2\x108\x107 (\x1\x2{}\x2\x108\x107)\x1", nick->GetQuestNameEnc(), Resources::GetMapName(nick->map_id)->encoded());
-            PrintDaily(GW::EncStrings::NicholasTheTraveller, buf.c_str(), now, false);
+            PrintDaily(GW::EncStrings::NicholasTheTraveller, buf.c_str(), is_tomorrow ? rollover : 0);
         }
     }
 
-    using QuestLogNames = std::unordered_map<GW::Constants::QuestID, GuiUtils::EncString*>;
+    using QuestLogNames = std::unordered_map<GW::Constants::QuestID, std::unique_ptr<GuiUtils::EncString>>;
 
     bool IsQuestAvailable(DailyQuests::QuestData* info)
     {
-        return info && info->GetQuestGiverOutpost() != MapID::None
-               && (info == DailyQuests::GetZaishenVanquish()
-                   || info == DailyQuests::GetZaishenBounty()
-                   || info == DailyQuests::GetZaishenCombat()
-                   || info == DailyQuests::GetZaishenMission()
-                   || info == DailyQuests::GetVanguardQuest()
-                   || info == DailyQuests::GetWantedByShiningBlade());
+        return info && info->GetQuestGiverOutpost() != MapID::None &&
+               (info == DailyQuests::GetZaishenVanquish().quest || info == DailyQuests::GetZaishenBounty().quest || info == DailyQuests::GetZaishenCombat().quest || info == DailyQuests::GetZaishenMission().quest ||
+                info == DailyQuests::GetVanguardQuest().quest || info == DailyQuests::GetWantedByShiningBlade().quest);
     }
 
     QuestLogNames quest_log_names;
 
     void ClearQuestLogInfo()
     {
-        for (auto ptr : quest_log_names) {
-            delete ptr.second;
-        }
         quest_log_names.clear();
     }
 
@@ -914,12 +807,9 @@ namespace {
         bool processing = false;
         for (auto& entry : w->quest_log) {
             if (entry.name && !quest_log_names.contains(entry.quest_id)) {
-                const auto enc_string = new GuiUtils::EncString();
-                enc_string
-                    ->reset(entry.name)
-                    ->language(GW::Constants::Language::English)
-                    ->wstring();
-                quest_log_names[entry.quest_id] = enc_string;
+                auto enc_string = std::make_unique<GuiUtils::EncString>();
+                enc_string->reset(entry.name)->language(GW::Constants::Language::English)->wstring();
+                quest_log_names[entry.quest_id] = std::move(enc_string);
             }
             if (!processing && quest_log_names[entry.quest_id]->IsDecoding()) {
                 processing = true;
@@ -935,32 +825,27 @@ namespace {
 
     const bool IsDailyQuest(const GW::Quest& quest)
     {
-        return wcseq(quest.location, GW::EncStrings::ZaishenMission)
-               || wcseq(quest.location, GW::EncStrings::ZaishenBounty)
-               || wcseq(quest.location, GW::EncStrings::ZaishenCombat)
-               || wcseq(quest.location, GW::EncStrings::ZaishenVanquish)
-               || wcseq(quest.location, GW::EncStrings::WantedByTheShiningBlade);
+        return wcseq(quest.location, GW::EncStrings::ZaishenMission) || wcseq(quest.location, GW::EncStrings::ZaishenBounty) || wcseq(quest.location, GW::EncStrings::ZaishenCombat) || wcseq(quest.location, GW::EncStrings::ZaishenVanquish) ||
+               wcseq(quest.location, GW::EncStrings::WantedByTheShiningBlade);
     }
 
-    GW::Quest* GetQuestByName(const char* quest_name_english)
+    GW::Quest* GetQuestByName(const char* quest_name_english, const wchar_t* location_enc = nullptr)
     {
         const auto w = GW::GetWorldContext();
         if (!w) return nullptr;
         const auto decoded_quest_names = GetQuestLogInfo();
-        if (!decoded_quest_names)
-            return nullptr;
+        if (!decoded_quest_names) return nullptr;
         for (auto& entry : w->quest_log) {
-            if (!IsDailyQuest(entry))
-                continue;
-            if (entry.name && decoded_quest_names->at(entry.quest_id)->string() == quest_name_english)
-                return &entry;
+            if (!IsDailyQuest(entry)) continue;
+            if (location_enc && !wcseq(entry.location, location_enc)) continue;
+            if (entry.name && decoded_quest_names->at(entry.quest_id)->string() == quest_name_english) return &entry;
         }
         return nullptr;
     }
 
-    const bool HasDailyQuest(const char* quest_name_english)
+    const bool HasDailyQuest(const char* quest_name_english, const wchar_t* location_enc = nullptr)
     {
-        return GetQuestByName(quest_name_english) != nullptr;
+        return GetQuestByName(quest_name_english, location_enc) != nullptr;
     }
 
     const char* you_have_this_quest = "You have this quest in your log";
@@ -972,19 +857,26 @@ namespace {
 
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0, 0));
         ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0, 0).Value);
-        const auto size = ImVec2(250.0f * ImGui::GetIO().FontGlobalScale, 0);
+        const auto size = ImVec2(250.0f * ImGui::FontScale(), 0);
         ImGui::Separator();
         bool travel = ImGui::Button("Travel to nearest outpost", size);
         bool wiki = ImGui::Button("Guild Wars Wiki", size);
+        const auto withdraw_amount = static_cast<uint32_t>(info->quantity * settings.nicholas_withdraw_gott_count);
+        char withdraw_label[64];
+        snprintf(withdraw_label, sizeof(withdraw_label), "Withdraw for %d GOTTs (%d items)", settings.nicholas_withdraw_gott_count, withdraw_amount);
+        bool withdraw = ImGui::Button(withdraw_label, size);
 
         ImGui::PopStyleColor();
         ImGui::PopStyleVar();
         if (travel) {
-            if (TravelWindow::Instance().TravelNearest(info->map_id))
-                return false;
+            if (TravelWindow::Instance().TravelNearest(info->map_id)) return false;
         }
         if (wiki) {
             GuiUtils::SearchWiki(info->GetWikiName());
+            return false;
+        }
+        if (withdraw) {
+            InventoryManager::WithdrawItemsByName(info->enc_name.c_str(), withdraw_amount);
             return false;
         }
         return true;
@@ -993,13 +885,13 @@ namespace {
     bool OnDailyQuestContextMenu(void* wparam)
     {
         const auto info = (DailyQuests::QuestData*)wparam;
-        const auto has_quest = HasDailyQuest(info->GetQuestName());
+        const auto has_quest = HasDailyQuest(info->GetQuestName(), info->quest_location_enc);
         const auto quest_available = IsQuestAvailable(info);
         ImGui::TextUnformatted(info->GetQuestName());
 
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0, 0));
         ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0, 0).Value);
-        const auto size = ImVec2(250.0f * ImGui::GetIO().FontGlobalScale, 0);
+        const auto size = ImVec2(250.0f * ImGui::FontScale(), 0);
         if (has_quest) {
             ImGui::TextColored(incomplete_color, you_have_this_quest);
         }
@@ -1016,12 +908,10 @@ namespace {
         ImGui::PopStyleVar();
         if (travel) {
             if (has_quest) {
-                if (TravelWindow::Instance().TravelNearest(info->map_id))
-                    return false;
+                if (TravelWindow::Instance().TravelNearest(info->map_id)) return false;
             }
             if (quest_available) {
-                if (TravelWindow::Instance().Travel(info->GetQuestGiverOutpost()))
-                    return false;
+                if (TravelWindow::Instance().Travel(info->GetQuestGiverOutpost())) return false;
             }
             Log::Error("Failed to travel to outpost for quest");
             return false;
@@ -1061,13 +951,74 @@ namespace {
 
     GW::HookEntry OnUIMessage_HookEntry;
 
+    bool IsZaishenMissionBonusActive(time_t unix)
+    {
+        const auto pve_idx = GetWeeklyPvEBonusIdx(&unix);
+        return pve_weekly_bonus_cycles[pve_idx].enc_name == GW::EncStrings::ZaishenMissionBonus;
+    }
+
+    bool IsZaishenMissionOutpost(GW::Constants::MapID current_map, GW::Constants::MapID zaishen_map)
+    {
+        if (current_map == zaishen_map) return true;
+        // Factions joint missions don't have a single entry outpost. Hardcode the entry outposts
+        // for each one. (AreaInfo has a mission_maps_to field that could in principle replace
+        // this, but it's not used anywhere else in the codebase and is untested.)
+        switch (zaishen_map) {
+            case MapID::Vizunah_Square_mission:
+                return current_map == MapID::Vizunah_Square_Local_Quarter_outpost
+                       || current_map == MapID::Vizunah_Square_Foreign_Quarter_outpost;
+            case MapID::Unwaking_Waters_mission:
+                return current_map == MapID::Cavalon_outpost
+                       || current_map == MapID::House_zu_Heltzer_outpost;
+            default:
+                return false;
+        }
+    }
+
+    void OnMapLoaded_CheckZaishenMission()
+    {
+        if (!settings.notify_zaishen_mission_outpost) return;
+        if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Outpost) return;
+        if (GW::Map::IsPreSearing()) return;
+
+        const time_t now = time(nullptr);
+        const auto zm_result = DailyQuests::GetZaishenMission(now);
+        if (!zm_result.quest) return;
+        const auto current_map = GW::Map::GetMapID();
+        if (!IsZaishenMissionOutpost(current_map, zm_result.quest->map_id)) return;
+
+        const bool has_quest = HasDailyQuest(zm_result.quest->GetQuestName(), GW::EncStrings::ZaishenMission);
+        const bool bonus_active = IsZaishenMissionBonusActive(now);
+        const uint32_t bonus_mult = bonus_active ? 2 : 1;
+
+        const DailyQuests::ZaishenCoinReward* reward = nullptr;
+        if (const auto* quest_id = ZaishenMissionMaps::GetQuestID(zm_result.quest->map_id)) {
+            reward = DailyQuests::GetZaishenCoinReward(*quest_id);
+        }
+
+        Log::Flash("This is today's Zaishen Mission: %s", zm_result.quest->GetQuestName());
+        if (reward) {
+            const auto bonus_suffix = bonus_active ? " (Zaishen Mission Bonus week: 2x)" : "";
+            Log::Info("Zaishen Coin reward: %u (NM) / %u (HM)%s", reward->nm * bonus_mult, reward->hm * bonus_mult, bonus_suffix);
+        }
+        if (!has_quest) {
+            Log::Info("You don't have this quest yet — use \"/zm take\" to travel to Embark Beach and pick it up.");
+        }
+    }
+
     void OnUIMessage(GW::HookStatus*, GW::UI::UIMessage message_id, void* wparam, void*)
     {
         switch (message_id) {
-            case GW::UI::UIMessage::kPreferenceValueChanged:
+            case GW::UI::UIMessage::kPreferenceValueChanged: {
                 const auto packet = (GW::UI::UIPacket::kPreferenceValueChanged*)wparam;
-                if (packet->preference_id == GW::UI::NumberPreference::Language)
-                    OnLanguageChanged((GW::Constants::Language)packet->new_value);
+                if (packet->preference_id == GW::UI::NumberPreference::Language) OnLanguageChanged((GW::Constants::Language)packet->new_value);
+                break;
+            }
+            case GW::UI::UIMessage::kMapLoaded:
+                pending_zaishen_mission_check = true;
+                break;
+            default:
+                break;
         }
     }
 
@@ -1075,7 +1026,6 @@ namespace {
     {
         static clock_t last_inv_check_sandford = 0;
 
-        // If the map is empty, populate it with unique keys from the cycle array
         if (nicholas_sandford_item_collected_count.empty()) {
             for (auto& item : nicholas_sandford_cycles) {
                 nicholas_sandford_item_collected_count[item.enc_name] = 0;
@@ -1083,7 +1033,6 @@ namespace {
         }
 
         if (!last_inv_check_sandford || TIMER_DIFF(last_inv_check_sandford) > 10000) {
-            // Check inventory for each Nicholas Sandford item
             for (const auto& [enc_name, count] : nicholas_sandford_item_collected_count) {
                 nicholas_sandford_item_collected_count[enc_name] = InventoryManager::CountItemsByName(enc_name.c_str());
             }
@@ -1094,13 +1043,228 @@ namespace {
         ASSERT(found != nicholas_sandford_item_collected_count.end());
         return found->second;
     }
-}
+    const std::unordered_map<GW::Constants::QuestID, DailyQuests::ZaishenCoinReward> zaishen_coin_rewards = {
+        {QuestID::ZaishenMission_The_Great_Northern_Wall, {15, 74}},
+        {QuestID::ZaishenMission_Fort_Ranik, {15, 74}},
+        {QuestID::ZaishenMission_Ruins_of_Surmia, {15, 74}},
+        {QuestID::ZaishenMission_Nolani_Academy, {15, 74}},
+        {QuestID::ZaishenMission_Borlis_Pass, {15, 74}},
+        {QuestID::ZaishenMission_The_Frost_Gate, {15, 74}},
+        {QuestID::ZaishenMission_Gates_of_Kryta, {15, 74}},
+        {QuestID::ZaishenMission_DAlessio_Seaboard, {20, 100}},
+        {QuestID::ZaishenMission_Divinity_Coast, {20, 100}},
+        {QuestID::ZaishenMission_The_Wilds, {20, 100}},
+        {QuestID::ZaishenMission_Bloodstone_Fen, {20, 100}},
+        {QuestID::ZaishenMission_Aurora_Glade, {20, 100}},
+        {QuestID::ZaishenMission_Riverside_Province, {20, 100}},
+        {QuestID::ZaishenMission_Sanctum_Cay, {20, 100}},
+        {QuestID::ZaishenMission_Dunes_of_Despair, {20, 100}},
+        {QuestID::ZaishenMission_Thirsty_River, {20, 100}},
+        {QuestID::ZaishenMission_Elona_Reach, {20, 100}},
+        {QuestID::ZaishenMission_Augury_Rock, {20, 100}},
+        {QuestID::ZaishenMission_The_Dragons_Lair, {20, 100}},
+        {QuestID::ZaishenMission_Ice_Caves_of_Sorrow, {30, 150}},
+        {QuestID::ZaishenMission_Iron_Mines_of_Moladune, {30, 150}},
+        {QuestID::ZaishenMission_Thunderhead_Keep, {30, 150}},
+        {QuestID::ZaishenMission_Ring_of_Fire, {30, 150}},
+        {QuestID::ZaishenMission_Abaddons_Mouth, {30, 150}},
+        {QuestID::ZaishenMission_Hells_Precipice, {30, 150}},
+        {QuestID::ZaishenMission_Zen_Daijun, {15, 74}},
+        {QuestID::ZaishenMission_Vizunah_Square, {20, 100}},
+        {QuestID::ZaishenMission_Nahpui_Quarter, {20, 100}},
+        {QuestID::ZaishenMission_Tahnnakai_Temple, {20, 100}},
+        {QuestID::ZaishenMission_Arborstone, {30, 150}},
+        {QuestID::ZaishenMission_Boreas_Seabed, {30, 150}},
+        {QuestID::ZaishenMission_Sunjiang_District, {30, 150}},
+        {QuestID::ZaishenMission_The_Eternal_Grove, {30, 150}},
+        {QuestID::ZaishenMission_Unwaking_Waters, {30, 150}},
+        {QuestID::ZaishenMission_Gyala_Hatchery, {30, 150}},
+        {QuestID::ZaishenMission_Raisu_Palace, {30, 150}},
+        {QuestID::ZaishenMission_Imperial_Sanctum, {30, 150}},
+        {QuestID::ZaishenMission_Chahbek_Village, {15, 74}},
+        {QuestID::ZaishenMission_Jokanur_Diggings, {15, 74}},
+        {QuestID::ZaishenMission_Blacktide_Den, {15, 74}},
+        {QuestID::ZaishenMission_Consulate_Docks, {15, 74}},
+        {QuestID::ZaishenMission_Venta_Cemetery, {20, 100}},
+        {QuestID::ZaishenMission_Kodonur_Crossroads, {20, 100}},
+        {QuestID::ZaishenMission_Rilohn_Refuge, {20, 100}},
+        {QuestID::ZaishenMission_Moddok_Crevice, {20, 100}},
+        {QuestID::ZaishenMission_Tihark_Orchard, {20, 100}},
+        {QuestID::ZaishenMission_Dzagonur_Bastion, {30, 150}},
+        {QuestID::ZaishenMission_Dasha_Vestibule, {30, 150}},
+        {QuestID::ZaishenMission_Grand_Court_of_Sebelkeh, {30, 150}},
+        {QuestID::ZaishenMission_Jennurs_Horde, {30, 150}},
+        {QuestID::ZaishenMission_Nundu_Bay, {30, 150}},
+        {QuestID::ZaishenMission_Gate_of_Desolation, {30, 150}},
+        {QuestID::ZaishenMission_Ruins_of_Morah, {30, 150}},
+        {QuestID::ZaishenMission_Gate_of_Pain, {30, 150}},
+        {QuestID::ZaishenMission_Gate_of_Madness, {30, 150}},
+        {QuestID::ZaishenMission_Abaddons_Gate, {30, 150}},
+        {QuestID::ZaishenMission_Finding_the_Bloodstone, {30, 105}},
+        {QuestID::ZaishenMission_The_Elusive_Golemancer, {30, 105}},
+        {QuestID::ZaishenMission_G_O_L_E_M, {40, 140}},
+        {QuestID::ZaishenMission_Against_the_Charr, {30, 105}},
+        {QuestID::ZaishenMission_Warband_of_Brothers, {30, 105}},
+        {QuestID::ZaishenMission_Assault_on_the_Stronghold, {40, 140}},
+        {QuestID::ZaishenMission_Curse_of_the_Nornbear, {30, 105}},
+        {QuestID::ZaishenMission_Blood_Washes_Blood, {30, 105}},
+        {QuestID::ZaishenMission_A_Gate_Too_Far, {40, 140}},
+        {QuestID::ZaishenMission_Destructions_Depths, {40, 140}},
+        {QuestID::ZaishenMission_A_Time_for_Heroes, {40, 140}},
+        {QuestID::ZaishenMission_Minister_Chos_Estate, {15, 74}},
+        {QuestID::ZaishenMission_Pogahn_Passage, {30, 150}},
+
+        {QuestID::ZaishenBounty_Urgoz, {60, 210}},
+        {QuestID::ZaishenBounty_Chung_The_Attuned, {20, 70}},
+        {QuestID::ZaishenBounty_Mungri_Magicbox, {20, 70}},
+        {QuestID::ZaishenBounty_The_Stygian_Lords, {40, 140}},
+        {QuestID::ZaishenBounty_Ilsundur_Lord_of_Fire, {40, 140}},
+        {QuestID::ZaishenBounty_Rragar_Maneater, {40, 140}},
+        {QuestID::ZaishenBounty_Murakai_Lady_of_the_Night, {40, 140}},
+        {QuestID::ZaishenBounty_Prismatic_Ooze, {30, 105}},
+        {QuestID::ZaishenBounty_Havok_Soulwail, {40, 140}},
+        {QuestID::ZaishenBounty_Frostmaw_the_Kinslayer, {40, 140}},
+        {QuestID::ZaishenBounty_Remnant_of_Antiquities, {40, 140}},
+        {QuestID::ZaishenBounty_Plague_of_Destruction, {40, 140}},
+        {QuestID::ZaishenBounty_Zoldark_the_Unholy, {40, 140}},
+        {QuestID::ZaishenBounty_Khabuus, {40, 140}},
+        {QuestID::ZaishenBounty_Zhim_Monns, {40, 140}},
+        {QuestID::ZaishenBounty_Eldritch_Ettin, {40, 140}},
+        {QuestID::ZaishenBounty_Fendi_Nin, {40, 140}},
+        {QuestID::ZaishenBounty_TPS_Regulator_Golem, {40, 140}},
+        {QuestID::ZaishenBounty_Arachni, {40, 140}},
+        {QuestID::ZaishenBounty_Forgewight, {40, 140}},
+        {QuestID::ZaishenBounty_Selvetarm, {40, 140}},
+        {QuestID::ZaishenBounty_Justiciar_Thommis, {40, 140}},
+        {QuestID::ZaishenBounty_Rand_Stormweaver, {40, 140}},
+        {QuestID::ZaishenBounty_Duncan_the_Black, {60, 210}},
+        {QuestID::ZaishenBounty_Fronis_Irontoe, {20, 70}},
+        {QuestID::ZaishenBounty_Magmus, {40, 140}},
+        {QuestID::ZaishenBounty_Lord_Khobay, {40, 140}},
+
+        {QuestID::ZaishenVanquish_Dejarin_Estate, {150, 150}},
+        {QuestID::ZaishenVanquish_Watchtower_Coast, {50, 50}},
+        {QuestID::ZaishenVanquish_Arbor_Bay, {250, 250}},
+        {QuestID::ZaishenVanquish_Barbarous_Shore, {150, 150}},
+        {QuestID::ZaishenVanquish_Deldrimor_Bowl, {150, 150}},
+        {QuestID::ZaishenVanquish_Boreas_Seabed, {150, 150}},
+        {QuestID::ZaishenVanquish_Cliffs_of_Dohjok, {50, 50}},
+        {QuestID::ZaishenVanquish_Diessa_Lowlands, {150, 150}},
+        {QuestID::ZaishenVanquish_Bukdek_Byway, {150, 150}},
+        {QuestID::ZaishenVanquish_Bjora_Marches, {150, 150}},
+        {QuestID::ZaishenVanquish_Crystal_Overlook, {150, 150}},
+        {QuestID::ZaishenVanquish_Diviners_Ascent, {50, 50}},
+        {QuestID::ZaishenVanquish_Dalada_Uplands, {250, 250}},
+        {QuestID::ZaishenVanquish_Drazach_Thicket, {150, 150}},
+        {QuestID::ZaishenVanquish_Fahranur_the_First_City, {50, 50}},
+        {QuestID::ZaishenVanquish_Dragons_Gullet, {250, 250}},
+        {QuestID::ZaishenVanquish_Ferndale, {250, 250}},
+        {QuestID::ZaishenVanquish_Forum_Highlands, {150, 150}},
+        {QuestID::ZaishenVanquish_Dreadnoughts_Drift, {250, 250}},
+        {QuestID::ZaishenVanquish_Drakkar_Lake, {250, 250}},
+        {QuestID::ZaishenVanquish_Dry_Top, {50, 50}},
+        {QuestID::ZaishenVanquish_Tears_of_the_Fallen, {50, 50}},
+        {QuestID::ZaishenVanquish_Gyala_Hatchery, {150, 150}},
+        {QuestID::ZaishenVanquish_Ettins_Back, {50, 50}},
+        {QuestID::ZaishenVanquish_Gandara_the_Moon_Fortress, {50, 50}},
+        {QuestID::ZaishenVanquish_Grothmar_Wardowns, {150, 150}},
+        {QuestID::ZaishenVanquish_Flame_Temple_Corridor, {50, 50}},
+        {QuestID::ZaishenVanquish_Haiju_Lagoon, {150, 150}},
+        {QuestID::ZaishenVanquish_Frozen_Forest, {150, 150}},
+        {QuestID::ZaishenVanquish_Garden_of_Seborhin, {150, 150}},
+        {QuestID::ZaishenVanquish_Grenths_Footprint, {150, 150}},
+        {QuestID::ZaishenVanquish_Jaya_Bluffs, {150, 150}},
+        {QuestID::ZaishenVanquish_Holdings_of_Chokhin, {150, 150}},
+        {QuestID::ZaishenVanquish_Ice_Cliff_Chasms, {150, 150}},
+        {QuestID::ZaishenVanquish_Griffons_Mouth, {50, 50}},
+        {QuestID::ZaishenVanquish_Kinya_Province, {50, 50}},
+        {QuestID::ZaishenVanquish_Issnur_Isles, {150, 150}},
+        {QuestID::ZaishenVanquish_Jaga_Moraine, {250, 250}},
+        {QuestID::ZaishenVanquish_Ice_Floe, {150, 150}},
+        {QuestID::ZaishenVanquish_Maishang_Hills, {150, 150}},
+        {QuestID::ZaishenVanquish_Jahai_Bluffs, {250, 250}},
+        {QuestID::ZaishenVanquish_Riven_Earth, {250, 250}},
+        {QuestID::ZaishenVanquish_Icedome, {250, 250}},
+        {QuestID::ZaishenVanquish_Minister_Chos_Estate, {50, 50}},
+        {QuestID::ZaishenVanquish_Mehtani_Keys, {150, 150}},
+        {QuestID::ZaishenVanquish_Sacnoth_Valley, {250, 250}},
+        {QuestID::ZaishenVanquish_Iron_Horse_Mine, {150, 150}},
+        {QuestID::ZaishenVanquish_Morostav_Trail, {250, 250}},
+        {QuestID::ZaishenVanquish_Plains_of_Jarin, {150, 150}},
+        {QuestID::ZaishenVanquish_Sparkfly_Swamp, {250, 250}},
+        {QuestID::ZaishenVanquish_Kessex_Peak, {150, 150}},
+        {QuestID::ZaishenVanquish_Mourning_Veil_Falls, {150, 150}},
+        {QuestID::ZaishenVanquish_The_Alkali_Pan, {250, 250}},
+        {QuestID::ZaishenVanquish_Varajar_Fells, {250, 250}},
+        {QuestID::ZaishenVanquish_Lornars_Pass, {250, 250}},
+        {QuestID::ZaishenVanquish_Pongmei_Valley, {150, 150}},
+        {QuestID::ZaishenVanquish_The_Floodplain_of_Mahnkelon, {150, 150}},
+        {QuestID::ZaishenVanquish_Verdant_Cascades, {150, 150}},
+        {QuestID::ZaishenVanquish_Majestys_Rest, {150, 150}},
+        {QuestID::ZaishenVanquish_Raisu_Palace, {150, 150}},
+        {QuestID::ZaishenVanquish_The_Hidden_City_of_Ahdashim, {150, 150}},
+        {QuestID::ZaishenVanquish_Rheas_Crater, {150, 150}},
+        {QuestID::ZaishenVanquish_Mamnoon_Lagoon, {50, 50}},
+        {QuestID::ZaishenVanquish_Shadows_Passage, {50, 50}},
+        {QuestID::ZaishenVanquish_The_Mirror_of_Lyss, {150, 150}},
+        {QuestID::ZaishenVanquish_Saoshang_Trail, {50, 50}},
+        {QuestID::ZaishenVanquish_Nebo_Terrace, {150, 150}},
+        {QuestID::ZaishenVanquish_Shenzun_Tunnels, {150, 150}},
+        {QuestID::ZaishenVanquish_The_Ruptured_Heart, {150, 150}},
+        {QuestID::ZaishenVanquish_Salt_Flats, {150, 150}},
+        {QuestID::ZaishenVanquish_North_Kryta_Province, {150, 150}},
+        {QuestID::ZaishenVanquish_Silent_Surf, {150, 150}},
+        {QuestID::ZaishenVanquish_The_Shattered_Ravines, {250, 250}},
+        {QuestID::ZaishenVanquish_Scoundrels_Rise, {50, 50}},
+        {QuestID::ZaishenVanquish_Old_Ascalon, {150, 150}},
+        {QuestID::ZaishenVanquish_Sunjiang_District, {150, 150}},
+        {QuestID::ZaishenVanquish_The_Sulphurous_Wastes, {250, 250}},
+        {QuestID::ZaishenVanquish_Magus_Stones, {250, 250}},
+        {QuestID::ZaishenVanquish_Perdition_Rock, {250, 250}},
+        {QuestID::ZaishenVanquish_Sunqua_Vale, {50, 50}},
+        {QuestID::ZaishenVanquish_Turais_Procession, {250, 250}},
+        {QuestID::ZaishenVanquish_Norrhart_Domains, {150, 150}},
+        {QuestID::ZaishenVanquish_Pockmark_Flats, {50, 50}},
+        {QuestID::ZaishenVanquish_Tahnnakai_Temple, {150, 150}},
+        {QuestID::ZaishenVanquish_Vehjin_Mines, {150, 150}},
+        {QuestID::ZaishenVanquish_Poisoned_Outcrops, {250, 250}},
+        {QuestID::ZaishenVanquish_Prophets_Path, {250, 250}},
+        {QuestID::ZaishenVanquish_The_Eternal_Grove, {150, 150}},
+        {QuestID::ZaishenVanquish_Tascas_Demise, {50, 50}},
+        {QuestID::ZaishenVanquish_Respendent_Makuun, {150, 150}},
+        {QuestID::ZaishenVanquish_Reed_Bog, {50, 50}},
+        {QuestID::ZaishenVanquish_Unwaking_Waters, {150, 150}},
+        {QuestID::ZaishenVanquish_Stingray_Strand, {150, 150}},
+        {QuestID::ZaishenVanquish_Sunward_Marches, {150, 150}},
+        {QuestID::ZaishenVanquish_Regent_Valley, {50, 50}},
+        {QuestID::ZaishenVanquish_Wajjun_Bazaar, {150, 150}},
+        {QuestID::ZaishenVanquish_Yatendi_Canyons, {150, 150}},
+        {QuestID::ZaishenVanquish_Twin_Serpent_Lakes, {150, 150}},
+        {QuestID::ZaishenVanquish_Sage_Lands, {150, 150}},
+        {QuestID::ZaishenVanquish_Xaquang_Skyway, {150, 150}},
+        {QuestID::ZaishenVanquish_Zehlon_Reach, {50, 50}},
+        {QuestID::ZaishenVanquish_Tangle_Root, {150, 150}},
+        {QuestID::ZaishenVanquish_Silverwood, {150, 150}},
+        {QuestID::ZaishenVanquish_Zen_Daijun, {150, 150}},
+        {QuestID::ZaishenVanquish_The_Arid_Sea, {150, 150}},
+        {QuestID::ZaishenVanquish_Nahpui_Quarter, {150, 150}},
+        {QuestID::ZaishenVanquish_Skyward_Reach, {150, 150}},
+        {QuestID::ZaishenVanquish_The_Scar, {250, 250}},
+        {QuestID::ZaishenVanquish_The_Black_Curtain, {150, 150}},
+        {QuestID::ZaishenVanquish_Panjiang_Peninsula, {150, 150}},
+        {QuestID::ZaishenVanquish_Snake_Dance, {250, 250}},
+        {QuestID::ZaishenVanquish_Travelers_Vale, {150, 150}},
+        {QuestID::ZaishenVanquish_The_Breach, {150, 150}},
+        {QuestID::ZaishenVanquish_Lahtenda_Bog, {250, 250}},
+        {QuestID::ZaishenVanquish_Spearhead_Peak, {150, 150}},
+    };
+
+} // namespace
 
 const MapID ZaishenQuestData::GetQuestGiverOutpost()
 {
     const auto _map_id = MapID::Great_Temple_of_Balthazar_outpost;
-    if (GW::Map::GetIsMapUnlocked(_map_id))
-        return _map_id;
+    if (GW::Map::GetIsMapUnlocked(_map_id)) return _map_id;
     return MapID::Embark_Beach;
 }
 
@@ -1125,69 +1289,160 @@ void DailyQuests::Draw(IDirect3DDevice9*)
     if (!ImGui::Begin(Name(), GetVisiblePtr(), GetWinFlags())) {
         return ImGui::End();
     }
-    float offset = 0.0f;
-    const float short_text_width = 120.0f * ImGui::GetIO().FontGlobalScale;
-    const float long_text_width = text_width * ImGui::GetIO().FontGlobalScale;
-    const float zm_width = 170.0f * ImGui::GetIO().FontGlobalScale;
-    const float zb_width = 185.0f * ImGui::GetIO().FontGlobalScale;
-    const float zc_width = 135.0f * ImGui::GetIO().FontGlobalScale;
-    const float zv_width = 200.0f * ImGui::GetIO().FontGlobalScale;
-    const float ws_width = 180.0f * ImGui::GetIO().FontGlobalScale;
-    const float nicholas_width = 180.0f * ImGui::GetIO().FontGlobalScale;
-    const float wbe_width = 145.0f * ImGui::GetIO().FontGlobalScale;
-    const float vanguard_width = 180.0f * ImGui::GetIO().FontGlobalScale;
-    const float sandford_width = 200.0f * ImGui::GetIO().FontGlobalScale;
+    const float short_text_width = 120.0f * ImGui::FontScale();
+    const float long_text_width = text_width * ImGui::FontScale();
+    const float zm_width = 170.0f * ImGui::FontScale();
+    const float zb_width = 185.0f * ImGui::FontScale();
+    const float zc_width = 135.0f * ImGui::FontScale();
+    const float zv_width = 200.0f * ImGui::FontScale();
+    const float ws_width = 180.0f * ImGui::FontScale();
+    const float nicholas_width = 180.0f * ImGui::FontScale();
+    const float wbe_width = 145.0f * ImGui::FontScale();
+    const float vanguard_width = 180.0f * ImGui::FontScale();
+    const float sandford_width = 200.0f * ImGui::FontScale();
 
-    const bool show_presearing = GetIsPreSearing() && show_presearing_dailies_in_window;
+    const bool is_pre = GW::Map::IsPreSearing();
 
-    ImGui::Text("Date");
-    ImGui::SameLine(offset += short_text_width);
-    if (show_presearing) {
-        ImGui::Text("Vanguard Quest");
-        ImGui::SameLine(offset += vanguard_width);
+    // Checkbox in top-right corner
+    const char* other_label = is_pre ? "Show post searing dailies" : "Show pre searing dailies";
+    const float checkbox_w = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(other_label).x;
+    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - checkbox_w - ImGui::GetStyle().WindowPadding.x);
+    ImGui::Checkbox(other_label, &settings.show_other_searing_dailies);
 
-        ImGui::Text("Nicholas Sandford");
-        ImGui::SameLine(offset += sandford_width);
+    auto write_daily_info = [](bool* subscribed, QuestData* info, bool check_completion) {
+        auto col = &normal_color;
+        if (check_completion && !CompletionWindow::IsAreaComplete(GW::AccountMgr::GetCurrentPlayerName(), info->map_id)) col = &incomplete_color;
+        if (*subscribed) col = &subscribed_color;
+        ImGui::TextColored(*col, info->GetQuestName());
+        auto lmb_clicked = ImGui::IsItemClicked();
+        auto rmb_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+        const auto hovered = ImGui::IsItemHovered();
+        if (HasDailyQuest(info->GetQuestName(), info->quest_location_enc)) {
+            ImGui::SameLine();
+            ImGui::TextColored(incomplete_color, ICON_FA_EXCLAMATION);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(you_have_this_quest);
+            }
+            lmb_clicked |= ImGui::IsItemClicked();
+            rmb_clicked |= ImGui::IsItemClicked(ImGuiMouseButton_Right);
+        }
+        if (rmb_clicked) {
+            ImGui::SetContextMenu(OnDailyQuestContextMenu, info);
+        }
+        if (lmb_clicked) {
+            *subscribed = !*subscribed;
+        }
+        if (hovered && check_completion) {
+            ImGui::SetTooltip([info]() {
+                OnDailyQuestTooltip(info);
+            });
+        }
+    };
+
+    struct ColumnDef {
+        const char* header;
+        float width;
+        std::function<void(time_t)> draw;
+    };
+
+    std::vector<ColumnDef> columns;
+
+    auto add_pre_cols = [&]() {
+        columns.push_back({"Vanguard Quest", vanguard_width, [&](time_t t) {
+            write_daily_info(&subscribed_vanguard[GetVanguardIdx(&t)], GetVanguardQuest(t).quest, false);
+        }});
+        columns.push_back({"Nicholas Sandford", sandford_width, [&](time_t t) {
+            const auto si = GetNicholasSandfordIdx(&t);
+            const bool prev = subscribed_nicholas_sandford[si];
+            const auto sandford_quest = GetNicholasSandford(t).quest;
+            write_daily_info(&subscribed_nicholas_sandford[si], sandford_quest, false);
+            const auto collected = GetNicholasSandfordCollectedQuantity(sandford_quest);
+            if (collected > 0) {
+                ImGui::SameLine(0, 0);
+                const ImColor* col = &normal_color;
+                if (collected >= 5) col = &incomplete_color;
+                if (collected >= 25) col = &complete_color;
+                ImGui::TextColored(*col, " (%d/5)", static_cast<int>(collected));
+            }
+            if (subscribed_nicholas_sandford[si] != prev) {
+                for (size_t j = 0; j < NICHOLAS_PRE_COUNT; ++j) {
+                    if (nicholas_sandford_cycles[j].GetQuestNameEnc() && wcscmp(nicholas_sandford_cycles[j].GetQuestNameEnc(), sandford_quest->GetQuestNameEnc()) == 0)
+                        subscribed_nicholas_sandford[j] = subscribed_nicholas_sandford[si];
+                }
+            }
+        }});
+    };
+
+    auto add_post_cols = [&]() {
+        if (settings.show_zaishen_missions_in_window)
+            columns.push_back({"Zaishen Mission", zm_width, [&](time_t t) {
+                write_daily_info(&subscribed_zaishen_missions[GetZaishenMissionIdx(&t)], GetZaishenMission(t).quest, true);
+            }});
+        if (settings.show_zaishen_bounty_in_window)
+            columns.push_back({"Zaishen Bounty", zb_width, [&](time_t t) {
+                write_daily_info(&subscribed_zaishen_bounties[GetZaishenBountyIdx(&t)], GetZaishenBounty(t).quest, true);
+            }});
+        if (settings.show_zaishen_combat_in_window)
+            columns.push_back({"Zaishen Combat", zc_width, [&](time_t t) {
+                write_daily_info(&subscribed_zaishen_combats[GetZaishenCombatIdx(&t)], GetZaishenCombat(t).quest, false);
+            }});
+        if (settings.show_zaishen_vanquishes_in_window)
+            columns.push_back({"Zaishen Vanquish", zv_width, [&](time_t t) {
+                write_daily_info(&subscribed_zaishen_vanquishes[GetZaishenVanquishIdx(&t)], GetZaishenVanquish(t).quest, true);
+            }});
+        if (settings.show_wanted_quests_in_window)
+            columns.push_back({"Wanted", ws_width, [&](time_t t) {
+                write_daily_info(&subscribed_wanted_quests[GetWantedByShiningBladeIdx(&t)], GetWantedByShiningBlade(t).quest, false);
+            }});
+        if (settings.show_nicholas_in_window)
+            columns.push_back({"Nicholas the Traveler", nicholas_width, [&](time_t t) {
+                const auto nick = static_cast<NicholasCycleData*>(GetNicholasTheTraveller(t).quest);
+                ImGui::TextUnformatted(nick->GetQuestName());
+                const auto rmb_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+                const auto hovered = ImGui::IsItemHovered();
+                const auto collected = nick->GetCollectedQuantity();
+                if (collected > 0) {
+                    ImGui::SameLine();
+                    const ImColor* col = &normal_color;
+                    if (collected >= nick->quantity) col = &incomplete_color;
+                    ImGui::TextColored(*col, "(%d/%d)", collected, nick->quantity);
+                }
+                if (rmb_clicked) ImGui::SetContextMenu(OnNicholasContextMenu, nick);
+                if (hovered) ImGui::SetTooltip("%s in %s", nick->GetQuestName(), nick->GetMapName());
+            }});
+        if (settings.show_weekly_bonus_pve_in_window)
+            columns.push_back({"Weekly Bonus PvE", wbe_width, [&](time_t t) {
+                const auto i = GetWeeklyBonusPvEIdx(&t);
+                write_daily_info(&subscribed_weekly_bonus_pve[i], &pve_weekly_bonus_cycles[i], false);
+            }});
+        if (settings.show_weekly_bonus_pvp_in_window)
+            columns.push_back({"Weekly Bonus PvP", long_text_width, [&](time_t t) {
+                const auto i = GetWeeklyBonusPvPIdx(&t);
+                write_daily_info(&subscribed_weekly_bonus_pvp[i], &pvp_weekly_bonus_cycles[i], false);
+            }});
+    };
+
+    if (is_pre) {
+        add_pre_cols();
+        if (settings.show_other_searing_dailies) add_post_cols();
     }
     else {
-        if (show_zaishen_missions_in_window) {
-            ImGui::Text("Zaishen Mission");
-            ImGui::SameLine(offset += zm_width);
-        }
-        if (show_zaishen_bounty_in_window) {
-            ImGui::Text("Zaishen Bounty");
-            ImGui::SameLine(offset += zb_width);
-        }
-        if (show_zaishen_combat_in_window) {
-            ImGui::Text("Zaishen Combat");
-            ImGui::SameLine(offset += zc_width);
-        }
-        if (show_zaishen_vanquishes_in_window) {
-            ImGui::Text("Zaishen Vanquish");
-            ImGui::SameLine(offset += zv_width);
-        }
-        if (show_wanted_quests_in_window) {
-            ImGui::Text("Wanted");
-            ImGui::SameLine(offset += ws_width);
-        }
-        if (show_nicholas_in_window) {
-            ImGui::Text("Nicholas the Traveler");
-            ImGui::SameLine(offset += nicholas_width);
-        }
-        if (show_weekly_bonus_pve_in_window) {
-            ImGui::Text("Weekly Bonus PvE");
-            ImGui::SameLine(offset += wbe_width);
-        }
-        if (show_weekly_bonus_pvp_in_window) {
-            ImGui::Text("Weekly Bonus PvP");
-            ImGui::SameLine(offset += long_text_width);
-        }
+        add_post_cols();
+        if (settings.show_other_searing_dailies) add_pre_cols();
+    }
+
+    float offset = 0.0f;
+    ImGui::Text("Date");
+    ImGui::SameLine(offset += short_text_width);
+    for (const auto& col : columns) {
+        ImGui::Text(col.header);
+        ImGui::SameLine(offset += col.width);
     }
     ImGui::NewLine();
     ImGui::Separator();
-    ImGui::BeginChild("dailies_scroll", ImVec2(0, -1 * (40.0f * ImGui::GetIO().FontGlobalScale) - ImGui::GetStyle().ItemInnerSpacing.y));
+
+    ImGui::BeginChild("dailies_scroll", ImVec2(0, -1 * (40.0f * ImGui::FontScale()) - ImGui::GetStyle().ItemInnerSpacing.y));
     time_t unix = time(nullptr);
-    uint32_t idx = 0;
 
     for (size_t i = 0; i < static_cast<size_t>(daily_quest_window_count); i++) {
         offset = 0.0f;
@@ -1204,130 +1459,15 @@ void DailyQuests::Draw(IDirect3DDevice9*)
                 ImGui::Text(mbstr);
                 break;
         }
-        auto write_daily_info = [](bool* subscribed, QuestData* info, bool check_completion) {
-            auto col = &normal_color;
-            if (check_completion && !CompletionWindow::IsAreaComplete(GW::AccountMgr::GetCurrentPlayerName(), info->map_id))
-                col = &incomplete_color;
-            if (*subscribed)
-                col = &subscribed_color;
-            ImGui::TextColored(*col, info->GetQuestName());
-            auto lmb_clicked = ImGui::IsItemClicked();
-            auto rmb_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
-            const auto hovered = ImGui::IsItemHovered();
-            if (HasDailyQuest(info->GetQuestName())) {
-                ImGui::SameLine();
-                ImGui::TextColored(incomplete_color, ICON_FA_EXCLAMATION);
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip(you_have_this_quest);
-                }
-                lmb_clicked |= ImGui::IsItemClicked();
-                rmb_clicked |= ImGui::IsItemClicked(ImGuiMouseButton_Right);
-            }
-            if (rmb_clicked) {
-                ImGui::SetContextMenu(OnDailyQuestContextMenu, info);
-            }
-            if (lmb_clicked) {
-                *subscribed = !*subscribed;
-            }
-            if (hovered && check_completion) {
-                ImGui::SetTooltip([info]() {
-                    OnDailyQuestTooltip(info);
-                });
-            }
-        };
-
-
         ImGui::SameLine(offset += short_text_width);
-        if (show_presearing) {
-            // Show Pre-Searing Vanguard Quests
-            idx = GetVanguardIdx(&unix);
-            write_daily_info(&subscribed_vanguard[idx], GetVanguardQuest(unix), false);
-            ImGui::SameLine(offset += vanguard_width);
-
-            // Show Pre-Searing Nicholas Sandford Quests
-            idx = GetNicholasSandfordIdx(&unix);
-            bool prev = subscribed_nicholas_sandford[idx]; // Save the previous subscription state for syncing
-            const auto sandford_quest = GetNicholasSandford(unix);
-            write_daily_info(&subscribed_nicholas_sandford[idx], sandford_quest, false);
-            const auto collected = GetNicholasSandfordCollectedQuantity(sandford_quest);
-            if (collected > 0) {
-                ImGui::SameLine(0, 0);
-                auto col = &normal_color;
-                if (collected >= 5) col = &incomplete_color; // Nicholas Sandford always requires 5 items
-                if (collected >= 25) col = &complete_color;  // 5 gifts per day is the maximum
-                ImGui::TextColored(*col, " (%d/5)", static_cast<int>(collected));
-            }
-            ImGui::SameLine(offset += sandford_width);
-
-            // If the subscription state has changed, sync the subscription for all quests with the same quest name
-            if (subscribed_nicholas_sandford[idx] != prev) {
-                for (size_t j = 0; j < NICHOLAS_PRE_COUNT; ++j) {
-                    if (nicholas_sandford_cycles[j].GetQuestNameEnc() && wcscmp(nicholas_sandford_cycles[j].GetQuestNameEnc(), sandford_quest->GetQuestNameEnc()) == 0) {
-                        subscribed_nicholas_sandford[j] = subscribed_nicholas_sandford[idx];
-                    }
-                }
-            }
-        }
-        else {
-            if (show_zaishen_missions_in_window) {
-                idx = GetZaishenMissionIdx(&unix);
-                write_daily_info(&subscribed_zaishen_missions[idx], GetZaishenMission(unix), true);
-                ImGui::SameLine(offset += zm_width);
-            }
-            if (show_zaishen_bounty_in_window) {
-                idx = GetZaishenBountyIdx(&unix);
-                write_daily_info(&subscribed_zaishen_bounties[idx], GetZaishenBounty(unix), true);
-                ImGui::SameLine(offset += zb_width);
-            }
-            if (show_zaishen_combat_in_window) {
-                idx = GetZaishenCombatIdx(&unix);
-                write_daily_info(&subscribed_zaishen_combats[idx], GetZaishenCombat(unix), false);
-                ImGui::SameLine(offset += zc_width);
-            }
-            if (show_zaishen_vanquishes_in_window) {
-                idx = GetZaishenVanquishIdx(&unix);
-                write_daily_info(&subscribed_zaishen_vanquishes[idx], GetZaishenVanquish(unix), true);
-                ImGui::SameLine(offset += zv_width);
-            }
-            if (show_wanted_quests_in_window) {
-                idx = GetWantedByShiningBladeIdx(&unix);
-                write_daily_info(&subscribed_wanted_quests[idx], GetWantedByShiningBlade(unix), false);
-                ImGui::SameLine(offset += ws_width);
-            }
-            if (show_nicholas_in_window) {
-                const auto nick = GetNicholasTheTraveller(unix);
-                ImGui::TextUnformatted(nick->GetQuestName());
-                auto rmb_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
-                const auto hovered = ImGui::IsItemHovered();
-                const auto collected = nick->GetCollectedQuantity();
-                if (collected > 0) {
-                    ImGui::SameLine();
-                    auto col = &normal_color;
-                    if (collected >= nick->quantity) col = &incomplete_color;
-                    ImGui::TextColored(*col, "(%d/%d)", collected, nick->quantity);
-                }
-                if (rmb_clicked) {
-                    ImGui::SetContextMenu(OnNicholasContextMenu, nick);
-                }
-                if (hovered) {
-                    ImGui::SetTooltip("%s in %s", nick->GetQuestName(), nick->GetMapName());
-                }
-                ImGui::SameLine(offset += nicholas_width);
-            }
-            if (show_weekly_bonus_pve_in_window) {
-                idx = GetWeeklyBonusPvEIdx(&unix);
-                write_daily_info(&subscribed_weekly_bonus_pve[idx], &pve_weekly_bonus_cycles[idx], false);
-                ImGui::SameLine(offset += wbe_width);
-            }
-            if (show_weekly_bonus_pvp_in_window) {
-                idx = GetWeeklyBonusPvPIdx(&unix);
-                write_daily_info(&subscribed_weekly_bonus_pvp[idx], &pvp_weekly_bonus_cycles[idx], false);
-                ImGui::SameLine(offset += long_text_width);
-            }
+        for (const auto& col : columns) {
+            col.draw(unix);
+            ImGui::SameLine(offset += col.width);
         }
         ImGui::NewLine();
         unix += 86400;
     }
+
     ImGui::EndChild();
     ImGui::TextDisabled("Click on a daily quest to get notified when its coming up.");
 
@@ -1336,7 +1476,7 @@ void DailyQuests::Draw(IDirect3DDevice9*)
     ImGui::TextColored(subscribed_color, "this color");
     ImGui::SameLine(0, 0);
     ImGui::TextDisabled(".");
-    if (!show_presearing) {
+    if (!is_pre) {
         ImGui::SameLine(0, 0);
         ImGui::TextDisabled(" Areas that you haven't completed on this player are highlighted in ");
         ImGui::SameLine(0, 0);
@@ -1382,177 +1522,99 @@ void DailyQuests::DrawSettingsInternal()
     ToolboxWindow::DrawSettingsInternal();
     ImGui::PushItemWidth(200.f * ImGui::FontScale());
     ImGui::InputInt("Show daily quests for the next N days", &daily_quest_window_count);
+    ImGui::InputInt("Number of GOTTs to withdraw items for (Nicholas)", &settings.nicholas_withdraw_gott_count);
     ImGui::PopItemWidth();
     ImGui::Text("Quests to show in Daily Quests window:");
     ImGui::Indent();
     ImGui::StartSpacedElements(200.f);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Zaishen Bounty", &show_zaishen_bounty_in_window);
+    ImGui::Checkbox("Zaishen Bounty", &settings.show_zaishen_bounty_in_window);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Zaishen Combat", &show_zaishen_combat_in_window);
+    ImGui::Checkbox("Zaishen Combat", &settings.show_zaishen_combat_in_window);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Zaishen Mission", &show_zaishen_missions_in_window);
+    ImGui::Checkbox("Zaishen Mission", &settings.show_zaishen_missions_in_window);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Zaishen Vanquish", &show_zaishen_vanquishes_in_window);
+    ImGui::Checkbox("Zaishen Vanquish", &settings.show_zaishen_vanquishes_in_window);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Wanted by Shining Blade", &show_wanted_quests_in_window);
+    ImGui::Checkbox("Wanted by Shining Blade", &settings.show_wanted_quests_in_window);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Nicholas The Traveler", &show_nicholas_in_window);
+    ImGui::Checkbox("Nicholas The Traveler", &settings.show_nicholas_in_window);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Weekly Bonus (PvE)", &show_weekly_bonus_pve_in_window);
+    ImGui::Checkbox("Weekly Bonus (PvE)", &settings.show_weekly_bonus_pve_in_window);
     ImGui::NextSpacedElement();
-    ImGui::Checkbox("Weekly Bonus (PvP)", &show_weekly_bonus_pvp_in_window);
+    ImGui::Checkbox("Weekly Bonus (PvP)", &settings.show_weekly_bonus_pvp_in_window);
 
     ImGui::Unindent();
 
-    ImGui::Checkbox("Show presearing dailies when in presearing", &show_presearing_dailies_in_window);
-    ImGui::ShowHelp("When enabled and you are in presearing, the window will show Vanguard Quest and Nicholas Sandford instead of the regular dailies.");
+    ImGui::Checkbox("Alert when entering today's Zaishen Mission outpost", &settings.notify_zaishen_mission_outpost);
+    ImGui::ShowHelp("Shows a flash message in chat with the mission name and coin reward when you enter the outpost that matches today's Zaishen Mission.");
 }
 
-void DailyQuests::LoadSettings(ToolboxIni* ini)
-{
-    ToolboxWindow::LoadSettings(ini);
-
-    LOAD_BOOL(show_zaishen_bounty_in_window);
-    LOAD_BOOL(show_zaishen_combat_in_window);
-    LOAD_BOOL(show_zaishen_missions_in_window);
-    LOAD_BOOL(show_zaishen_vanquishes_in_window);
-    LOAD_BOOL(show_wanted_quests_in_window);
-    LOAD_BOOL(show_nicholas_in_window);
-    LOAD_BOOL(show_weekly_bonus_pve_in_window);
-    LOAD_BOOL(show_weekly_bonus_pvp_in_window);
-    LOAD_BOOL(show_presearing_dailies_in_window);
-
-    const char* zms = ini->GetValue(Name(), VAR_NAME(subscribed_zaishen_missions), "0");
-    const std::bitset<ZAISHEN_MISSION_COUNT> zmb(zms);
-    for (auto i = 0u; i < zmb.size(); i++) {
-        subscribed_zaishen_missions[i] = zmb[i] == 1;
+namespace {
+    // Subscriptions keep their legacy bitset-string encoding in JSON ("0101..."), same as the INI.
+    template <size_t N>
+    void LoadSubscriptions(const SettingsDoc& doc, const ToolboxIni* legacy, const char* section, const char* key, bool (&out)[N])
+    {
+        std::string value;
+        if (!doc.Get(section, key, value)) {
+            value = legacy->GetValue(section, key, "0");
+        }
+        const std::bitset<N> bits(value);
+        for (auto i = 0u; i < bits.size(); i++) {
+            out[i] = bits[i] == 1;
+        }
     }
 
-    const char* zbs = ini->GetValue(Name(), VAR_NAME(subscribed_zaishen_bounties), "0");
-    const std::bitset<ZAISHEN_BOUNTY_COUNT> zbb(zbs);
-    for (auto i = 0u; i < zbb.size(); i++) {
-        subscribed_zaishen_bounties[i] = zbb[i] == 1;
-    }
-
-    const char* zcs = ini->GetValue(Name(), VAR_NAME(subscribed_zaishen_combats), "0");
-    const std::bitset<ZAISHEN_COMBAT_COUNT> zcb(zcs);
-    for (auto i = 0u; i < zcb.size(); i++) {
-        subscribed_zaishen_combats[i] = zcb[i] == 1;
-    }
-
-    const char* zvs = ini->GetValue(Name(), VAR_NAME(subscribed_zaishen_vanquishes), "0");
-    const std::bitset<ZAISHEN_VANQUISH_COUNT> zvb(zvs);
-    for (auto i = 0u; i < zvb.size(); i++) {
-        subscribed_zaishen_vanquishes[i] = zvb[i] == 1;
-    }
-
-    const char* wss = ini->GetValue(Name(), VAR_NAME(subscribed_wanted_quests), "0");
-    const std::bitset<WANTED_COUNT> wsb(wss);
-    for (auto i = 0u; i < wsb.size(); i++) {
-        subscribed_wanted_quests[i] = wsb[i] == 1;
-    }
-
-    const char* wbes = ini->GetValue(Name(), VAR_NAME(subscribed_weekly_bonus_pve), "0");
-    const std::bitset<WEEKLY_BONUS_PVE_COUNT> wbeb(wbes);
-    for (auto i = 0u; i < wbeb.size(); i++) {
-        subscribed_weekly_bonus_pve[i] = wbeb[i] == 1;
-    }
-
-    const char* wbps = ini->GetValue(Name(), VAR_NAME(subscribed_weekly_bonus_pvp), "0");
-    const std::bitset<WEEKLY_BONUS_PVP_COUNT> wbpb(wbps);
-    for (auto i = 0u; i < wbpb.size(); i++) {
-        subscribed_weekly_bonus_pvp[i] = wbpb[i] == 1;
-    }
-
-    const char* vgs = ini->GetValue(Name(), VAR_NAME(subscribed_vanguard), "0");
-    const std::bitset<VANGUARD_COUNT> vgb(vgs);
-    for (auto i = 0u; i < vgb.size(); i++) {
-        subscribed_vanguard[i] = vgb[i] == 1;
-    }
-
-    const char* nss = ini->GetValue(Name(), VAR_NAME(subscribed_nicholas_sandford), "0");
-    const std::bitset<NICHOLAS_PRE_COUNT> nsb(nss);
-    for (auto i = 0u; i < nsb.size(); i++) {
-        subscribed_nicholas_sandford[i] = nsb[i] == 1;
+    template <size_t N>
+    void SaveSubscriptions(SettingsDoc& doc, const char* section, const char* key, const bool (&in)[N])
+    {
+        std::bitset<N> bits;
+        for (auto i = 0u; i < bits.size(); i++) {
+            bits[i] = in[i] ? 1 : 0;
+        }
+        doc.Set(section, key, bits.to_string());
     }
 }
 
-void DailyQuests::SaveSettings(ToolboxIni* ini)
+void DailyQuests::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
-    ToolboxWindow::SaveSettings(ini);
+    ToolboxWindow::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
 
-    SAVE_BOOL(show_zaishen_bounty_in_window);
-    SAVE_BOOL(show_zaishen_combat_in_window);
-    SAVE_BOOL(show_zaishen_missions_in_window);
-    SAVE_BOOL(show_zaishen_vanquishes_in_window);
-    SAVE_BOOL(show_wanted_quests_in_window);
-    SAVE_BOOL(show_nicholas_in_window);
-    SAVE_BOOL(show_weekly_bonus_pve_in_window);
-    SAVE_BOOL(show_weekly_bonus_pvp_in_window);
-    SAVE_BOOL(show_presearing_dailies_in_window);
-    std::bitset<ZAISHEN_MISSION_COUNT> zmb;
-    for (auto i = 0u; i < zmb.size(); i++) {
-        zmb[i] = subscribed_zaishen_missions[i] ? 1 : 0;
-    }
-    ini->SetValue(Name(), VAR_NAME(subscribed_zaishen_missions), zmb.to_string().c_str());
+    LoadSubscriptions(doc, legacy, Name(), VAR_NAME(subscribed_zaishen_missions), subscribed_zaishen_missions);
+    LoadSubscriptions(doc, legacy, Name(), VAR_NAME(subscribed_zaishen_bounties), subscribed_zaishen_bounties);
+    LoadSubscriptions(doc, legacy, Name(), VAR_NAME(subscribed_zaishen_combats), subscribed_zaishen_combats);
+    LoadSubscriptions(doc, legacy, Name(), VAR_NAME(subscribed_zaishen_vanquishes), subscribed_zaishen_vanquishes);
+    LoadSubscriptions(doc, legacy, Name(), VAR_NAME(subscribed_wanted_quests), subscribed_wanted_quests);
+    LoadSubscriptions(doc, legacy, Name(), VAR_NAME(subscribed_weekly_bonus_pve), subscribed_weekly_bonus_pve);
+    LoadSubscriptions(doc, legacy, Name(), VAR_NAME(subscribed_weekly_bonus_pvp), subscribed_weekly_bonus_pvp);
+    LoadSubscriptions(doc, legacy, Name(), VAR_NAME(subscribed_vanguard), subscribed_vanguard);
+    LoadSubscriptions(doc, legacy, Name(), VAR_NAME(subscribed_nicholas_sandford), subscribed_nicholas_sandford);
+}
 
-    std::bitset<ZAISHEN_BOUNTY_COUNT> zbb;
-    for (auto i = 0u; i < zbb.size(); i++) {
-        zbb[i] = subscribed_zaishen_bounties[i] ? 1 : 0;
-    }
-    ini->SetValue(Name(), VAR_NAME(subscribed_zaishen_bounties), zbb.to_string().c_str());
+void DailyQuests::SaveSettings(SettingsDoc& doc)
+{
+    ToolboxWindow::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 
-    std::bitset<ZAISHEN_COMBAT_COUNT> zcb;
-    for (auto i = 0u; i < zcb.size(); i++) {
-        zcb[i] = subscribed_zaishen_combats[i] ? 1 : 0;
-    }
-    ini->SetValue(Name(), VAR_NAME(subscribed_zaishen_combats), zcb.to_string().c_str());
-
-    std::bitset<ZAISHEN_VANQUISH_COUNT> zvb;
-    for (auto i = 0u; i < zvb.size(); i++) {
-        zvb[i] = subscribed_zaishen_vanquishes[i] ? 1 : 0;
-    }
-    ini->SetValue(Name(), VAR_NAME(subscribed_zaishen_vanquishes), zvb.to_string().c_str());
-
-    std::bitset<WANTED_COUNT> wsb;
-    for (auto i = 0u; i < wsb.size(); i++) {
-        wsb[i] = subscribed_wanted_quests[i] ? 1 : 0;
-    }
-    ini->SetValue(Name(), VAR_NAME(subscribed_wanted_quests), wsb.to_string().c_str());
-
-    std::bitset<WEEKLY_BONUS_PVE_COUNT> wbeb;
-    for (auto i = 0u; i < wbeb.size(); i++) {
-        wbeb[i] = subscribed_weekly_bonus_pve[i] ? 1 : 0;
-    }
-    ini->SetValue(Name(), VAR_NAME(subscribed_weekly_bonus_pve), wbeb.to_string().c_str());
-
-    std::bitset<WEEKLY_BONUS_PVP_COUNT> wbpb;
-    for (auto i = 0u; i < wbpb.size(); i++) {
-        wbpb[i] = subscribed_weekly_bonus_pvp[i] ? 1 : 0;
-    }
-    ini->SetValue(Name(), VAR_NAME(subscribed_weekly_bonus_pvp), wbpb.to_string().c_str());
-
-    std::bitset<VANGUARD_COUNT> vgb;
-    for (auto i = 0u; i < vgb.size(); i++) {
-        vgb[i] = subscribed_vanguard[i] ? 1 : 0;
-    }
-    ini->SetValue(Name(), VAR_NAME(subscribed_vanguard), vgb.to_string().c_str());
-
-    std::bitset<NICHOLAS_PRE_COUNT> nsb;
-    for (auto i = 0u; i < nsb.size(); i++) {
-        nsb[i] = subscribed_nicholas_sandford[i] ? 1 : 0;
-    }
-    ini->SetValue(Name(), VAR_NAME(subscribed_nicholas_sandford), nsb.to_string().c_str());
+    SaveSubscriptions(doc, Name(), VAR_NAME(subscribed_zaishen_missions), subscribed_zaishen_missions);
+    SaveSubscriptions(doc, Name(), VAR_NAME(subscribed_zaishen_bounties), subscribed_zaishen_bounties);
+    SaveSubscriptions(doc, Name(), VAR_NAME(subscribed_zaishen_combats), subscribed_zaishen_combats);
+    SaveSubscriptions(doc, Name(), VAR_NAME(subscribed_zaishen_vanquishes), subscribed_zaishen_vanquishes);
+    SaveSubscriptions(doc, Name(), VAR_NAME(subscribed_wanted_quests), subscribed_wanted_quests);
+    SaveSubscriptions(doc, Name(), VAR_NAME(subscribed_weekly_bonus_pve), subscribed_weekly_bonus_pve);
+    SaveSubscriptions(doc, Name(), VAR_NAME(subscribed_weekly_bonus_pvp), subscribed_weekly_bonus_pvp);
+    SaveSubscriptions(doc, Name(), VAR_NAME(subscribed_vanguard), subscribed_vanguard);
+    SaveSubscriptions(doc, Name(), VAR_NAME(subscribed_nicholas_sandford), subscribed_nicholas_sandford);
 }
 
 void DailyQuests::Initialize()
 {
     ToolboxWindow::Initialize();
+    SettingsRegistry::Register(this, settings);
 
     for (auto& cycle : zaishen_bounty_cycles) {
-        if (cycle.enc_name[0] != L'\x108')
-            cycle.enc_name = std::format(L"\x108\x107{}\x1", cycle.enc_name);
+        if (cycle.enc_name[0] != L'\x108') cycle.enc_name = std::format(L"\x108\x107{}\x1", cycle.enc_name);
     }
 
 
@@ -1573,88 +1635,131 @@ void DailyQuests::Initialize()
     }
 
     // Trigger string decodes
-    for (auto& it : wanted_by_shining_blade_cycles) { it.GetQuestName(); }
-    for (auto& it : vanguard_cycles) { it.GetQuestName(); }
-    for (auto& it : nicholas_sandford_cycles) { it.GetQuestName(); }
+    for (auto& it : wanted_by_shining_blade_cycles) {
+        it.GetQuestName();
+        it.quest_location_enc = GW::EncStrings::WantedByTheShiningBlade;
+    }
+    for (auto& it : vanguard_cycles) {
+        it.GetQuestName();
+    }
+    for (auto& it : nicholas_sandford_cycles) {
+        it.GetQuestName();
+    }
 
-    for (auto& it : nicholas_cycles) { it.GetQuestName(); }
-    for (auto& it : zaishen_bounty_cycles) { it.GetQuestName(); }
-    for (auto& it : zaishen_combat_cycles) { it.GetQuestName(); }
-    for (auto& it : zaishen_vanquish_cycles) { it.GetQuestName(); }
-    for (auto& it : zaishen_mission_cycles) { it.GetQuestName(); }
-    for (auto& it : pvp_weekly_bonus_cycles) { it.GetQuestName(); }
-    for (auto& it : pve_weekly_bonus_cycles) { it.GetQuestName(); }
+    for (auto& it : nicholas_cycles) {
+        it.GetQuestName();
+    }
+    for (auto& it : zaishen_bounty_cycles) {
+        it.GetQuestName();
+        it.quest_location_enc = GW::EncStrings::ZaishenBounty;
+    }
+    for (auto& it : zaishen_combat_cycles) {
+        it.GetQuestName();
+        it.quest_location_enc = GW::EncStrings::ZaishenCombat;
+    }
+    for (auto& it : zaishen_vanquish_cycles) {
+        it.GetQuestName();
+        it.quest_location_enc = GW::EncStrings::ZaishenVanquish;
+    }
+    for (auto& it : zaishen_mission_cycles) {
+        it.GetQuestName();
+        it.quest_location_enc = GW::EncStrings::ZaishenMission;
+    }
+    for (auto& it : pvp_weekly_bonus_cycles) {
+        it.GetQuestName();
+    }
+    for (auto& it : pve_weekly_bonus_cycles) {
+        it.GetQuestName();
+    }
 
-    chat_commands = {
-        {L"zm", CmdZaishenMission},
-        {L"zb", CmdZaishenBounty},
-        {L"zc", CmdZaishenCombat},
-        {L"zv", CmdZaishenVanquish},
-        {L"vanguard", CmdVanguard},
-        {L"wanted", CmdWantedByShiningBlade},
-        {L"nicholas", CmdNicholas},
-        {L"weekly", CmdWeeklyBonus},
-        {L"today", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
-            if (GetIsPreSearing()) {
-                GW::Chat::SendChat('/', "vanguard");
-                GW::Chat::SendChat('/', "nicholas");
-                return;
-            }
-            GW::Chat::SendChat('/', "zm");
-            GW::Chat::SendChat('/', "zb");
-            GW::Chat::SendChat('/', "zc");
-            GW::Chat::SendChat('/', "zv");
-            GW::Chat::SendChat('/', "wanted");
-            GW::Chat::SendChat('/', "nicholas");
-            GW::Chat::SendChat('/', "weekly");
-        }},
-        {L"daily", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
-            GW::Chat::SendChat('/', "today");
-        }},
-        {L"dailies", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
-            GW::Chat::SendChat('/', "today");
-        }},
-        {L"tomorrow", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
-            if (GetIsPreSearing()) {
-                GW::Chat::SendChat('/', "vanguard tomorrow");
-                GW::Chat::SendChat('/', "nicholas tomorrow");
-                return;
-            }
-            GW::Chat::SendChat('/', "zm tomorrow");
-            GW::Chat::SendChat('/', "zb tomorrow");
-            GW::Chat::SendChat('/', "zc tomorrow");
-            GW::Chat::SendChat('/', "zv tomorrow");
-            GW::Chat::SendChat('/', "wanted tomorrow");
-            GW::Chat::SendChat('/', "nicholas tomorrow");
-        }}
-    };
+    chat_commands =
+        {{L"zm", CmdZaishenMission},
+         {L"zb", CmdZaishenBounty},
+         {L"zc", CmdZaishenCombat},
+         {L"zv", CmdZaishenVanquish},
+         {L"vanguard", CmdVanguard},
+         {L"wanted", CmdWantedByShiningBlade},
+         {L"nicholas", CmdNicholas},
+         {L"weekly", CmdWeeklyBonus},
+         {L"today",
+          [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
+              if (GW::Map::IsPreSearing()) {
+                  GW::Chat::SendChat('/', "vanguard");
+                  GW::Chat::SendChat('/', "nicholas");
+                  return;
+              }
+              GW::Chat::SendChat('/', "zm");
+              GW::Chat::SendChat('/', "zb");
+              GW::Chat::SendChat('/', "zc");
+              GW::Chat::SendChat('/', "zv");
+              GW::Chat::SendChat('/', "wanted");
+              GW::Chat::SendChat('/', "nicholas");
+              GW::Chat::SendChat('/', "weekly");
+          }},
+         {L"daily",
+          [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
+              GW::Chat::SendChat('/', "today");
+          }},
+         {L"dailies",
+          [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
+              GW::Chat::SendChat('/', "today");
+          }},
+         {L"tomorrow", [](GW::HookStatus*, const wchar_t*, const int, const LPWSTR*) -> void {
+              if (GW::Map::IsPreSearing()) {
+                  GW::Chat::SendChat('/', "vanguard tomorrow");
+                  GW::Chat::SendChat('/', "nicholas tomorrow");
+                  return;
+              }
+              GW::Chat::SendChat('/', "zm tomorrow");
+              GW::Chat::SendChat('/', "zb tomorrow");
+              GW::Chat::SendChat('/', "zc tomorrow");
+              GW::Chat::SendChat('/', "zv tomorrow");
+              GW::Chat::SendChat('/', "wanted tomorrow");
+              GW::Chat::SendChat('/', "nicholas tomorrow");
+          }}};
     for (const auto& it : chat_commands) {
         GW::Chat::CreateCommand(&ChatCmd_HookEntry, it.first, it.second);
     }
 
-    GW::UI::RegisterUIMessageCallback(&OnUIMessage_HookEntry, GW::UI::UIMessage::kPreferenceValueChanged, OnUIMessage, 0x8000);
+    RegisterUIMessageCallback(&OnUIMessage_HookEntry, GW::UI::UIMessage::kPreferenceValueChanged, OnUIMessage, 0x8000);
+    RegisterUIMessageCallback(&OnUIMessage_HookEntry, GW::UI::UIMessage::kMapLoaded, OnUIMessage, 0x8000);
 }
 
 void DailyQuests::Terminate()
 {
     ToolboxWindow::Terminate();
 
-    for (auto& it : wanted_by_shining_blade_cycles) { it.Terminate(); }
-    for (auto& it : vanguard_cycles) { it.Terminate(); }
-    for (auto& it : nicholas_sandford_cycles) { it.Terminate(); }
-
-    for (auto& it : nicholas_cycles) { it.Terminate(); }
-    for (auto& it : zaishen_bounty_cycles) { it.Terminate(); }
-    for (auto& it : zaishen_combat_cycles) { it.Terminate(); }
-    for (auto& it : zaishen_vanquish_cycles) { it.Terminate(); }
-    for (auto& it : zaishen_mission_cycles) { it.Terminate(); }
-    for (auto& it : pvp_weekly_bonus_cycles) { it.Terminate(); }
-    for (auto& it : pve_weekly_bonus_cycles) { it.Terminate(); }
-
-    for (const auto& it : region_names) {
-        it.second->Release();
+    for (auto& it : wanted_by_shining_blade_cycles) {
+        it.Terminate();
     }
-    region_names.clear();
+    for (auto& it : vanguard_cycles) {
+        it.Terminate();
+    }
+    for (auto& it : nicholas_sandford_cycles) {
+        it.Terminate();
+    }
+
+    for (auto& it : nicholas_cycles) {
+        it.Terminate();
+    }
+    for (auto& it : zaishen_bounty_cycles) {
+        it.Terminate();
+    }
+    for (auto& it : zaishen_combat_cycles) {
+        it.Terminate();
+    }
+    for (auto& it : zaishen_vanquish_cycles) {
+        it.Terminate();
+    }
+    for (auto& it : zaishen_mission_cycles) {
+        it.Terminate();
+    }
+    for (auto& it : pvp_weekly_bonus_cycles) {
+        it.Terminate();
+    }
+    for (auto& it : pve_weekly_bonus_cycles) {
+        it.Terminate();
+    }
 
     GW::Chat::DeleteCommand(&ChatCmd_HookEntry);
     ClearQuestLogInfo();
@@ -1663,16 +1768,19 @@ void DailyQuests::Terminate()
 
 void DailyQuests::Update(const float)
 {
+    if (pending_zaishen_mission_check && !GW::UI::IsLoadingScreenShown()) {
+        pending_zaishen_mission_check = false;
+        OnMapLoaded_CheckZaishenMission();
+    }
     if (pending_quest_take && GetQuestLogInfo() && *pending_quest_take->GetQuestName()) {
-        const auto has_quest = GetQuestByName(pending_quest_take->GetQuestName());
+        const auto has_quest = GetQuestByName(pending_quest_take->GetQuestName(), pending_quest_take->quest_location_enc);
         if (!has_quest) {
             TravelWindow::Instance().Travel(pending_quest_take->GetQuestGiverOutpost());
         }
         else {
             auto map_to = has_quest->map_to;
             // NB: Quest rewards are easier to get from gtob
-            if (map_to == MapID::Embark_Beach)
-                map_to = MapID::Great_Temple_of_Balthazar_outpost;
+            if (map_to == MapID::Embark_Beach) map_to = MapID::Great_Temple_of_Balthazar_outpost;
             TravelWindow::Instance().TravelNearest(map_to);
         }
         pending_quest_take = nullptr;
@@ -1747,11 +1855,9 @@ void DailyQuests::Update(const float)
     }
 }
 
-DailyQuests::QuestData::QuestData(MapID map_id, const wchar_t* enc_name)
-    : map_id(map_id)
+DailyQuests::QuestData::QuestData(MapID map_id, const wchar_t* enc_name) : map_id(map_id)
 {
-    if (enc_name)
-        this->enc_name = enc_name;
+    if (enc_name) this->enc_name = enc_name;
 }
 
 DailyQuests::QuestData::~QuestData()
@@ -1761,20 +1867,15 @@ DailyQuests::QuestData::~QuestData()
 
 void DailyQuests::QuestData::Terminate()
 {
-    if (name_translated) delete name_translated;
-    name_translated = nullptr;
-    if (name_english) delete name_english;
-    name_english = nullptr;
+    name_translated.reset();
+    name_english.reset();
 }
 
 void DailyQuests::QuestData::Decode(bool force)
 {
-    if (name_translated && name_english && !force)
-        return;
-    if (!name_translated)
-        name_translated = new GuiUtils::EncString(nullptr, false);
-    if (!name_english)
-        name_english = new GuiUtils::EncString(nullptr, false);
+    if (name_translated && name_english && !force) return;
+    if (!name_translated) name_translated = std::make_unique<GuiUtils::EncString>(nullptr, false);
+    if (!name_english) name_english = std::make_unique<GuiUtils::EncString>(nullptr, false);
     name_english->language(GW::Constants::Language::English);
     name_translated->language(GW::UI::GetTextLanguage());
 
@@ -1823,24 +1924,15 @@ const char* DailyQuests::QuestData::GetMapName()
 
 const std::string& DailyQuests::QuestData::GetRegionName()
 {
-    const auto region_name = Resources::GetRegionName(map_id);
-    auto found = region_names.find(region_name);
-    if (found == region_names.end()) {
-        region_names[region_name] = new GuiUtils::EncString(region_name);
-        found = region_names.find(region_name);
-    }
-    return found->second->string();
+    return Resources::GetRegionName(map_id)->string(); // Resources owns the decode + cache
 }
 
-DailyQuests::NicholasCycleData::NicholasCycleData(const wchar_t* enc_name, uint32_t quantity, MapID map_id)
-    : QuestData(map_id, enc_name),
-      quantity(quantity) {}
+DailyQuests::NicholasCycleData::NicholasCycleData(const wchar_t* enc_name, uint32_t quantity, MapID map_id) : QuestData(map_id, enc_name), quantity(quantity) {}
 
 size_t DailyQuests::NicholasCycleData::GetCollectedQuantity()
 {
     static clock_t last_inv_check = 0;
     if (!last_inv_check || TIMER_DIFF(last_inv_check) > 10000) {
-        // Check inventory
         for (auto& item : nicholas_cycles) {
             nicholas_item_collected_count[&item] = InventoryManager::CountItemsByName(item.enc_name.c_str());
         }
@@ -1853,20 +1945,21 @@ size_t DailyQuests::NicholasCycleData::GetCollectedQuantity()
 
 void DailyQuests::NicholasCycleData::Decode(bool force)
 {
-    if (name_translated && !force)
-        return;
+    if (name_translated && !force) return;
     const auto old_enc_name = enc_name;
     enc_name = std::format(L"\xa35\x101{}\x10a{}\x1", (wchar_t)(quantity + 0x100), old_enc_name);
     QuestData::Decode(force);
     enc_name = old_enc_name;
 }
 
-const MapID DailyQuests::QuestData::GetQuestGiverOutpost() { return MapID::None; }
+const MapID DailyQuests::QuestData::GetQuestGiverOutpost()
+{
+    return MapID::None;
+}
 
 DailyQuests::NicholasCycleData* DailyQuests::GetNicholasItemInfo(const wchar_t* item_name_encoded)
 {
-    if (!item_name_encoded)
-        return nullptr;
+    if (!item_name_encoded) return nullptr;
     for (auto& nicholas_item : nicholas_cycles) {
         if (nicholas_item.enc_name == item_name_encoded) {
             return &nicholas_item;
@@ -1875,74 +1968,140 @@ DailyQuests::NicholasCycleData* DailyQuests::GetNicholasItemInfo(const wchar_t* 
     return nullptr;
 }
 
-DailyQuests::NicholasCycleData* DailyQuests::GetNicholasTheTraveller(time_t unix)
+DailyQuests::QuestData* DailyQuests::GetNicholasSandfordItemInfo(const wchar_t* item_name_encoded)
 {
-    if (!unix)
-        unix = time(nullptr);
-    return &nicholas_cycles[GetNicholasTheTravellerIdx(&unix)];
+    if (!item_name_encoded) return nullptr;
+    for (auto& sandford_item : nicholas_sandford_cycles) {
+        if (sandford_item.enc_name == item_name_encoded) {
+            return &sandford_item;
+        }
+    }
+    return nullptr;
 }
 
-DailyQuests::QuestData* DailyQuests::GetZaishenBounty(time_t unix)
-{
-    if (!unix)
-        unix = time(nullptr);
-    return &zaishen_bounty_cycles[GetZaishenBountyIdx(&unix)];
+bool DailyQuests::IsNicholasItem(const GW::Item* item) {
+    return item && item->name_enc && (GetNicholasIngredientInfo(item->name_enc) || GetNicholasItemInfo(item->name_enc));
 }
 
-DailyQuests::QuestData* DailyQuests::GetZaishenMission(time_t unix)
+
+const DailyQuests::NicholasIngredientInfo* DailyQuests::GetNicholasIngredientInfo(const wchar_t* ingredient_enc)
 {
-    if (!unix)
-        unix = time(nullptr);
-    return &zaishen_mission_cycles[GetZaishenMissionIdx(&unix)];
+    // Crafting ingredients whose end product Nicholas The Traveller collects.
+    // If an item's enc name isn't known yet, it will be a placeholder that won't match - find it in-game and update EncStrings.h.
+    // TODO: update ingredient_quantity values to reflect actual counts needed to craft a full set of nick items
+    static NicholasIngredientInfo ingredients[] = {
+        {GW::EncStrings::SkaleFins, GW::EncStrings::BowlofSkalefinSoup, 2},
+        {GW::EncStrings::ChunkOfDrakeFlesh, GW::EncStrings::DrakeKabob, 1},
+        {GW::EncStrings::IbogaPetals, GW::EncStrings::PahnaiSalad, 2},
+        {GW::EncStrings::MandragorRoot, GW::EncStrings::MandragorRootCake, 3},
+        {GW::EncStrings::BogSkaleFins, GW::EncStrings::Herring, 5},         
+        {GW::EncStrings::SentientSpores, GW::EncStrings::BottleofVabbianWine, 5}
+    };
+    if (!ingredient_enc) return 0;
+    for (const auto& entry : ingredients) {
+        if (wcscmp(ingredient_enc, entry.ingredient) == 0) return &entry;
+    }
+    return 0;
 }
 
-DailyQuests::QuestData* DailyQuests::GetZaishenCombat(time_t unix)
+time_t DailyQuests::GetTimestampFromNicholasSandford(QuestData* data)
 {
-    if (!unix)
-        unix = time(nullptr);
-    return &zaishen_combat_cycles[GetZaishenCombatIdx(&unix)];
+    constexpr time_t NICHOLAS_PRE_START_DATE = 1239260400;
+    constexpr int SECONDSINADAY = 86400;
+    auto index = -1;
+    for (auto i = 0; i < static_cast<int>(NICHOLAS_PRE_COUNT); i++) {
+        if (&nicholas_sandford_cycles[i] == data) {
+            index = i;
+        }
+    }
+    assert(index != -1);
+    return GetNextEventTime(NICHOLAS_PRE_START_DATE, time(nullptr), index, NICHOLAS_PRE_COUNT, SECONDSINADAY);
 }
 
-DailyQuests::QuestData* DailyQuests::GetZaishenVanquish(time_t unix)
+DailyQuests::DailyQuestResult DailyQuests::GetNicholasTheTraveller(time_t unix)
 {
-    if (!unix)
-        unix = time(nullptr);
-    return &zaishen_vanquish_cycles[GetZaishenVanquishIdx(&unix)];
+    constexpr time_t EPOCH = 1323097200;
+    constexpr time_t PERIOD = SECONDSINAWEEK;
+    if (!unix) unix = time(nullptr);
+    return {&nicholas_cycles[GetNicholasTheTravellerIdx(&unix)], GetNextRotationTime(unix, EPOCH, PERIOD)};
 }
 
-DailyQuests::QuestData* DailyQuests::GetNicholasSandford(time_t unix)
+DailyQuests::DailyQuestResult DailyQuests::GetZaishenBounty(time_t unix)
 {
-    if (!unix)
-        unix = time(nullptr);
-    return &nicholas_sandford_cycles[GetNicholasSandfordIdx(&unix)];
+    constexpr time_t EPOCH = 1244736000;
+    constexpr time_t PERIOD = 86400;
+    if (!unix) unix = time(nullptr);
+    return {&zaishen_bounty_cycles[GetZaishenBountyIdx(&unix)], GetNextRotationTime(unix, EPOCH, PERIOD)};
 }
 
-DailyQuests::QuestData* DailyQuests::GetVanguardQuest(time_t unix)
+DailyQuests::DailyQuestResult DailyQuests::GetZaishenMission(time_t unix)
 {
-    if (!unix)
-        unix = time(nullptr);
-    return &vanguard_cycles[GetVanguardIdx(&unix)];
+    constexpr time_t EPOCH = 1299168000;
+    constexpr time_t PERIOD = 86400;
+    if (!unix) unix = time(nullptr);
+    return {&zaishen_mission_cycles[GetZaishenMissionIdx(&unix)], GetNextRotationTime(unix, EPOCH, PERIOD)};
 }
 
-DailyQuests::QuestData* DailyQuests::GetWantedByShiningBlade(time_t unix)
+DailyQuests::DailyQuestResult DailyQuests::GetZaishenCombat(time_t unix)
 {
-    if (!unix)
-        unix = time(nullptr);
-    return &wanted_by_shining_blade_cycles[GetWantedByShiningBladeIdx(&unix)];
+    constexpr time_t EPOCH = 1256227200;
+    constexpr time_t PERIOD = 86400;
+    if (!unix) unix = time(nullptr);
+    return {&zaishen_combat_cycles[GetZaishenCombatIdx(&unix)], GetNextRotationTime(unix, EPOCH, PERIOD)};
 }
 
-DailyQuests::QuestData* DailyQuests::GetWeeklyPvEBonus(time_t unix)
+DailyQuests::DailyQuestResult DailyQuests::GetZaishenVanquish(time_t unix)
 {
-    if (!unix)
-        unix = time(nullptr);
-    return &pve_weekly_bonus_cycles[GetWeeklyPvEBonusIdx(&unix)];
+    constexpr time_t EPOCH = 1299168000;
+    constexpr time_t PERIOD = 86400;
+    if (!unix) unix = time(nullptr);
+    return {&zaishen_vanquish_cycles[GetZaishenVanquishIdx(&unix)], GetNextRotationTime(unix, EPOCH, PERIOD)};
 }
 
-DailyQuests::QuestData* DailyQuests::GetWeeklyPvPBonus(time_t unix)
+DailyQuests::DailyQuestResult DailyQuests::GetNicholasSandford(time_t unix)
 {
-    if (!unix)
-        unix = time(nullptr);
-    return &pvp_weekly_bonus_cycles[GetWeeklyPvPBonusIdx(&unix)];
+    constexpr time_t EPOCH = 1239260400;
+    constexpr time_t PERIOD = 86400;
+    if (!unix) unix = time(nullptr);
+    return {&nicholas_sandford_cycles[GetNicholasSandfordIdx(&unix)], GetNextRotationTime(unix, EPOCH, PERIOD)};
+}
+
+DailyQuests::DailyQuestResult DailyQuests::GetVanguardQuest(time_t unix)
+{
+    constexpr time_t EPOCH = 1299168000;
+    constexpr time_t PERIOD = 86400;
+    if (!unix) unix = time(nullptr);
+    return {&vanguard_cycles[GetVanguardIdx(&unix)], GetNextRotationTime(unix, EPOCH, PERIOD)};
+}
+
+DailyQuests::DailyQuestResult DailyQuests::GetWantedByShiningBlade(time_t unix)
+{
+    constexpr time_t EPOCH = 1276012800;
+    constexpr time_t PERIOD = 86400;
+    if (!unix) unix = time(nullptr);
+    return {&wanted_by_shining_blade_cycles[GetWantedByShiningBladeIdx(&unix)], GetNextRotationTime(unix, EPOCH, PERIOD)};
+}
+
+DailyQuests::DailyQuestResult DailyQuests::GetWeeklyPvEBonus(time_t unix)
+{
+    constexpr time_t EPOCH = 1368457200;
+    constexpr time_t PERIOD = SECONDSINAWEEK;
+    if (!unix) unix = time(nullptr);
+    return {&pve_weekly_bonus_cycles[GetWeeklyPvEBonusIdx(&unix)], GetNextRotationTime(unix, EPOCH, PERIOD)};
+}
+
+DailyQuests::DailyQuestResult DailyQuests::GetWeeklyPvPBonus(time_t unix)
+{
+    constexpr time_t EPOCH = 1368457200;
+    constexpr time_t PERIOD = SECONDSINAWEEK;
+    if (!unix) unix = time(nullptr);
+    return {&pvp_weekly_bonus_cycles[GetWeeklyPvPBonusIdx(&unix)], GetNextRotationTime(unix, EPOCH, PERIOD)};
+}
+
+const DailyQuests::ZaishenCoinReward* DailyQuests::GetZaishenCoinReward(GW::Constants::QuestID quest_id)
+{
+    const auto it = zaishen_coin_rewards.find(quest_id);
+    return it != zaishen_coin_rewards.end() ? &it->second : nullptr;
 }
 
 time_t DailyQuests::GetTimestampFromNicholasTheTraveller(NicholasCycleData* data)

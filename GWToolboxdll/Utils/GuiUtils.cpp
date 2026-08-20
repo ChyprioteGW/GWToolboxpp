@@ -11,6 +11,7 @@
 
 #include "GuiUtils.h"
 #include <Utils/TextUtils.h>
+#include <Modules/GwDatModule.h>
 
 namespace {
     struct AttributeConstData {
@@ -98,6 +99,11 @@ namespace {
     {
         return "https://wiki.guildwars.com/index.php";
     }
+
+    const uint32_t TEMPLATE_ICONS_FILE_ID = 0x40D6B;
+    const uint32_t SKILL_ICONS_FILE_ID = 0x43aa4;
+    const uint32_t GW_BUTTON_ICONS_FILE_ID = 0x22ea6;
+
 }
 
 namespace GuiUtils {
@@ -115,14 +121,63 @@ namespace GuiUtils {
         return max_places;
     }
 
-    void DrawSkillbar(const char* build_code, bool show_attributes) {
-        GW::SkillbarMgr::SkillTemplate skill_template;
-        if (!(build_code && *build_code && GW::SkillbarMgr::DecodeSkillTemplate(skill_template, build_code)))
+    bool IconButtonConfirm(const char* label, GwButtonIcon icon, const ImVec2& size, const ImGuiButtonFlags flags)
+    {
+        bool confirmed = false;
+        const bool triggered = IconButton(label, icon, size, flags);
+        if (ImGui::BeginConfirmTrigger("##IconButtonConfirm", triggered)) {
+            ImGui::Text("Are you sure?");
+            ImGui::EndConfirmTrigger(&confirmed);
+        }
+        return confirmed;
+    }
+
+    bool IconButton(const char* label, GwButtonIcon icon, const ImVec2& size, const ImGuiButtonFlags flags)
+    {
+        if (icon == GwButtonIcon::ChatIcon) {
+            IDirect3DTexture9** tex = GwDatModule::LoadTextureFromFileId(GW_BUTTON_ICONS_FILE_ID);
+            if (!tex || !*tex) return false;
+
+            static constexpr float SPRITE_W = 64.f;
+            static constexpr float SPRITE_H = 64.f;
+            static constexpr ImVec2 ICON_SIZE = ImVec2(40.f, 32.f);
+
+            // Normal at row 0, active at row 1 — both at x=0
+            const ImVec2 uv0(0.f, 0.f);
+            const ImVec2 uv1(ICON_SIZE.x / SPRITE_W, ICON_SIZE.y / SPRITE_H);
+
+            ImTextureID tex_id = reinterpret_cast<ImTextureID>(*tex);
+            return ImGui::CompositeIconButton(label, &tex_id, 1, size, flags, ICON_SIZE, uv0, uv1);
+        }
+
+        IDirect3DTexture9** tex = GwDatModule::LoadTextureFromFileId(TEMPLATE_ICONS_FILE_ID);
+        if (!tex || !*tex) return false;
+
+        static constexpr float SPRITE_W = 128.f;
+        static constexpr float SPRITE_H = 64.f;
+        static constexpr ImVec2 ICON_SIZE = ImVec2(23.f, 23.f);
+
+        const int base = static_cast<int>(icon) * 2;
+        const float x0 = (base % 5) * ICON_SIZE.x;
+        const float y0 = (base / 5) * ICON_SIZE.y;
+        const ImVec2 uv0(x0 / SPRITE_W, y0 / SPRITE_H);
+        const ImVec2 uv1((x0 + ICON_SIZE.x) / SPRITE_W, (y0 + ICON_SIZE.y) / SPRITE_H);
+
+        ImTextureID tex_id = reinterpret_cast<ImTextureID>(*tex);
+        return ImGui::CompositeIconButton(label, &tex_id, 1, size, flags, ICON_SIZE, uv0, uv1);
+    }
+
+
+    void DrawSkillbar(const GW::SkillbarMgr::SkillTemplate* skill_template_pt, bool show_attributes)
+    {
+        if (!skill_template_pt)
             return;
+        const auto& skill_template = *skill_template_pt;
 
         const float text_size = ImGui::CalcTextSize(" ").y;
         const float skill_height = text_size * 2.f;
         const auto skill_size = ImVec2(skill_height, skill_height);
+
 
         if (show_attributes) {
             std::string attributes_str;
@@ -147,21 +202,33 @@ namespace GuiUtils {
         const auto primary_icon = Resources::GetProfessionIcon(skill_template.primary);
 
         auto cursor_pos = ImGui::GetCursorPos();
-        ImGui::ImageCropped(*primary_icon, { text_size, text_size });
+        ImGui::ImageCropped(*primary_icon, {text_size, text_size});
 
         if (skill_template.secondary != GW::Constants::Profession::None) {
             cursor_pos.y += text_size;
             ImGui::SetCursorPos(cursor_pos);
             const auto secondary_icon = Resources::GetProfessionIcon(skill_template.secondary);
-            ImGui::ImageCropped(*secondary_icon, { text_size, text_size });
+            ImGui::ImageCropped(*secondary_icon, {text_size, text_size});
             cursor_pos.y -= text_size;
         }
         cursor_pos.x += text_size;
         for (auto& skill : skill_template.skills) {
             ImGui::SetCursorPos(cursor_pos);
-            ImGui::ImageCropped(*Resources::GetSkillImage(skill), skill_size);
+            if (skill != GW::Constants::SkillID::No_Skill) {
+                ImGui::ImageCropped(*Resources::GetSkillImage(skill), skill_size);
+            }
+            else {
+                ImGui::Dummy(skill_size);
+            }
             cursor_pos.x += skill_size.x;
         }
+    }
+
+    void DrawSkillbar(const char* build_code, bool show_attributes) {
+        GW::SkillbarMgr::SkillTemplate skill_template;
+        if (!(build_code && *build_code && GW::SkillbarMgr::DecodeSkillTemplate(skill_template, build_code)))
+            return;
+        DrawSkillbar(&skill_template, show_attributes);
     }
 
     void FlashWindow(const bool force)
@@ -283,24 +350,6 @@ namespace GuiUtils {
             rect.w -= correct;
         }
         return rect;
-    }
-
-    float GetPartyHealthbarHeight()
-    {
-        const auto interfacesize =
-            static_cast<GW::Constants::InterfaceSize>(GetPreference(GW::UI::EnumPreference::InterfaceSize));
-        switch (interfacesize) {
-            case GW::Constants::InterfaceSize::SMALL:
-                return GW::Constants::HealthbarHeight::Small;
-            case GW::Constants::InterfaceSize::NORMAL:
-                return GW::Constants::HealthbarHeight::Normal;
-            case GW::Constants::InterfaceSize::LARGE:
-                return GW::Constants::HealthbarHeight::Large;
-            case GW::Constants::InterfaceSize::LARGER:
-                return GW::Constants::HealthbarHeight::Larger;
-            default:
-                return GW::Constants::HealthbarHeight::Normal;
-        }
     }
     void IniToBitset(const std::string& str, std::bitset<256>& key_combo) {
         key_combo.reset();  // Clear previous data before setting bits
@@ -446,115 +495,4 @@ namespace GuiUtils {
         return true;
     }
 
-    EncString* EncString::reset(const uint32_t _enc_string_id, const bool sanitise)
-    {
-        if (_enc_string_id && encoded_ws.length()) {
-            const uint32_t this_id = GW::UI::EncStrToUInt32(encoded_ws.c_str());
-            if (this_id == _enc_string_id) {
-                return this;
-            }
-        }
-        reset(nullptr, sanitise);
-        if (_enc_string_id) {
-            wchar_t out[8] = {0};
-            if (!GW::UI::UInt32ToEncStr(_enc_string_id, out, _countof(out))) {
-                return this;
-            }
-            encoded_ws = out;
-        }
-        return this;
-    }
-
-    EncString* EncString::language(const GW::Constants::Language l)
-    {
-        if (language_id == l) {
-            return this;
-        }
-        ASSERT(!decoding);
-        language_id = l;
-        decoded_ws.clear();
-        decoded_s.clear();
-        decoding = decoded = false;
-        return this;
-    }
-
-    EncString* EncString::reset(const wchar_t* _enc_string, const bool sanitise)
-    {
-        if (_enc_string && wcscmp(_enc_string, encoded_ws.c_str()) == 0) {
-            return this;
-        }
-        ASSERT(!decoding);
-        encoded_ws.clear();
-        decoded_ws.clear();
-        decoded_s.clear();
-        decoding = decoded = false;
-        sanitised = !sanitise;
-        if (_enc_string) {
-            encoded_ws = _enc_string;
-        }
-        return this;
-    }
-
-    void EncString::decode() {
-        if (!decoded && !decoding && !encoded_ws.empty()) {
-            decoding = true;
-            GW::GameThread::Enqueue([&] {
-                GW::UI::AsyncDecodeStr(encoded_ws.c_str(), OnStringDecoded, this, language_id);
-                });
-        }
-    }
-
-    std::wstring& EncString::wstring()
-    {
-        decode();
-        sanitise();
-        return decoded_ws;
-    }
-
-    void EncString::sanitise()
-    {
-        if (!sanitised && !decoded_ws.empty()) {
-            sanitised = true;
-            decoded_ws = TextUtils::StripTags(decoded_ws);
-        }
-    }
-
-    void EncString::Release()
-    {
-        release = true;
-        if (!decoding) {
-            delete this;
-        }
-    }
-
-    EncString::~EncString() {
-        ASSERT(!decoding);
-    }
-
-    // ReSharper disable once CppParameterMayBeConst
-    // ReSharper disable once CppParameterMayBeConstPtrOrRef
-    void EncString::OnStringDecoded(void* param, const wchar_t* decoded)
-    {
-        const auto context = static_cast<EncString*>(param);
-        if (!(context && context->decoding && !context->decoded)) {
-            return; // Not expecting a decoded string; may have been reset() before response was received.
-        }
-        if (decoded && decoded[0]) {
-            context->decoded_ws = decoded;
-        }
-        context->decoded = true;
-        context->decoding = false;
-        if (context->release) {
-            delete context;
-        }
-    }
-
-    std::string& EncString::string()
-    {
-        wstring();
-        if (sanitised && !decoded_ws.empty() && decoded_s.empty()) {
-            decoded_s = TextUtils::WStringToString(decoded_ws);
-        }
-        return decoded_s;
-    }
 }

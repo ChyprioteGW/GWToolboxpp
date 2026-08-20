@@ -6,6 +6,10 @@
 
 #include <Timer.h>
 
+namespace GW {
+    struct AgentLiving;
+}
+
 class Pcon {
 public:
     static int pcons_delay;
@@ -14,8 +18,16 @@ public:
     static float size;
     static bool disable_when_not_found;
     static bool refill_if_below_threshold;
+    static bool always_refill_pcons;
     static bool pcons_by_character;
-    static Color enabled_bg_color;
+    static Colors::SettingColor enabled_bg_color;
+
+    // Persisted per-pcon state, stored under the pcon's ini name; "default" entry in active is the fallback character toggle
+    struct Settings {
+        std::map<std::string, bool> active{};
+        int threshold = 0;
+        bool visible = true;
+    };
 
     static DWORD alcohol_level;
     static bool suppress_drunk_effect;
@@ -44,16 +56,18 @@ protected:
     static bool UnreserveSlotForMove(size_t bagId, size_t slot); // Unlock slot.
     // Prevents more than 1 pcon from trying to add to the same slot at the same time.
     static bool ReserveSlotForMove(size_t bagId, size_t slot);
-    // Checks whether another pcon has reserved this slot.
     static bool IsSlotReservedForMove(size_t bagId, size_t slot);
 
     static bool IsControllingCurrentChar();
 
     void UpdateRefill();
+    // Returns ordered list of model IDs from inventory that this pcon matches, for prioritized refill.
+    std::vector<DWORD> GetPrioritizedModelIdsFromInventory() const;
 
-    GW::Bag* pending_move_to_bag = nullptr;
+    GW::Constants::Bag pending_move_to_bag = GW::Constants::Bag::None;
     uint32_t pending_move_to_slot = 0;
     uint32_t pending_move_to_quantity = 0;
+    clock_t pending_move_to_started = 0;
 
     void Terminate();
 public:
@@ -80,8 +94,9 @@ public:
     void Toggle() { SetEnabled(!IsEnabled()); }
     // Resets pcon counters so it needs to recalc number and refill.
     void ResetCounts();
-    void LoadSettings(const ToolboxIni* ini, const char* section);
-    void SaveSettings(ToolboxIni* ini, const char* section) const;
+    void LoadSettings(const SettingsDoc& doc, const char* section, const ToolboxIni* legacy);
+    void SaveSettings(SettingsDoc& doc, const char* section) const;
+    void LoadSettings(const ToolboxIni* ini, const char* section); // legacy ini fallback
 
     bool* enabled{}; // This is a ptr to the current char's status if applicable.
     bool pcon_quantity_checked = false;
@@ -103,7 +118,7 @@ public:
 protected:
     std::string desc;
     // Cycles through character's inventory to find a matching (incomplete) stack, or an empty pane.
-    static GW::Item* FindVacantStackOrSlotInInventory(const GW::Item* likeItem = nullptr);
+    static bool FindVacantStackOrSlotInInventory(const GW::Item* likeItem, GW::Item* result);
     GW::AgentLiving* player = nullptr;
 
     // "default" is the fallback
@@ -123,7 +138,7 @@ protected:
     [[nodiscard]] virtual bool CanUseByInstanceType() const;
     [[nodiscard]] virtual bool CanUseByEffect() const = 0;
     virtual void OnButtonClick() { Toggle(); }
-    virtual size_t QuantityForEach(const GW::Item* item) const = 0;
+    virtual size_t PointsPerUse(const GW::Item* item) const = 0;
 
 private:
     IDirect3DTexture9** texture = nullptr;
@@ -153,7 +168,7 @@ public:
 
 protected:
     [[nodiscard]] bool CanUseByEffect() const override;
-    size_t QuantityForEach(const GW::Item* item) const override;
+    size_t PointsPerUse(const GW::Item* item) const override;
     void OnButtonClick() override;
 
 private:
@@ -195,7 +210,7 @@ public:
     [[nodiscard]] bool CanUseByInstanceType() const override;
     [[nodiscard]] bool IsVisible() const override;
     [[nodiscard]] bool CanUseByEffect() const override;
-    size_t QuantityForEach(const GW::Item* item) const override;
+    size_t PointsPerUse(const GW::Item* item) const override;
 };
 
 // Used only in outposts for refilling
@@ -232,7 +247,7 @@ public:
         return visible && (!hide_city_pcons_in_explorable_areas || GW::Map::GetInstanceType() != GW::Constants::InstanceType::Explorable);
     }
     void Draw(IDirect3DDevice9* device) override;
-    size_t QuantityForEach(const GW::Item* item) const override { return item->model_id == itemID ? 1u : 0u; }
+    size_t PointsPerUse(const GW::Item* item) const override { return item->model_id == itemID ? 1u : 0u; }
 
 private:
     const DWORD itemID;
@@ -252,7 +267,7 @@ public:
     PconAlcohol(const PconAlcohol&) = delete;
 
     [[nodiscard]] bool CanUseByEffect() const override;
-    size_t QuantityForEach(const GW::Item* item) const override;
+    size_t PointsPerUse(const GW::Item* item) const override;
     void ForceUse();
 };
 
@@ -271,7 +286,7 @@ public:
 
     void Update(int delay = -1) override;
     [[nodiscard]] bool CanUseByEffect() const override;
-    size_t QuantityForEach(const GW::Item* item) const override;
+    size_t PointsPerUse(const GW::Item* item) const override;
 };
 
 class PconScroll : public Pcon {
@@ -288,5 +303,5 @@ public:
     PconScroll(const PconCity&) = delete;
 
     [[nodiscard]] bool CanUseByEffect() const override;
-    size_t QuantityForEach(const GW::Item* item) const override;
+    size_t PointsPerUse(const GW::Item* item) const override;
 };

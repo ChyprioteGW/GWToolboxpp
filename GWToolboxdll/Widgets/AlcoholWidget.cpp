@@ -18,15 +18,32 @@
 
 #include "Utils/FontLoader.h"
 
+namespace {
+    AlcoholWidget::Settings settings;
+}
+
 void AlcoholWidget::Initialize()
 {
     ToolboxWidget::Initialize();
+    SettingsRegistry::Register(this, settings);
     // how much time was queued up with drinks
     alcohol_time = 0;
     // last time the player used a drink
     last_alcohol = 0;
     alcohol_level = 0;
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::PostProcess>(&PostProcess_Entry, &AlcoholWidget::AlcUpdate,-0x8000);
+}
+
+void AlcoholWidget::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
+{
+    ToolboxWidget::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
+}
+
+void AlcoholWidget::SaveSettings(SettingsDoc& doc)
+{
+    ToolboxWidget::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 }
 
 uint32_t AlcoholWidget::GetAlcoholTitlePoints()
@@ -92,10 +109,8 @@ void AlcoholWidget::AlcUpdate(GW::HookStatus*, const GW::Packet::StoC::PostProce
     if (packet->level > instance.alcohol_level) {
         // if the player already had a drink going
         if (instance.alcohol_level) {
-            // set remaining time
             instance.alcohol_time = static_cast<int>(instance.alcohol_time + static_cast<long>(instance.last_alcohol) - static_cast<long>(time(nullptr)));
         }
-        // add drink time
         instance.alcohol_time += 60 * static_cast<int>(packet->level - instance.alcohol_level);
         instance.last_alcohol = time(nullptr);
     }
@@ -116,7 +131,7 @@ void AlcoholWidget::Draw(IDirect3DDevice9*)
         return;
     }
 
-    if (only_show_when_drunk && alcohol_level == 0) {
+    if (settings.only_show_when_drunk && alcohol_level == 0) {
         return;
     }
 
@@ -129,14 +144,14 @@ void AlcoholWidget::Draw(IDirect3DDevice9*)
         }
     }
 
-    if (only_show_when_drunk && t < 0) {
+    if (settings.only_show_when_drunk && t < 0) {
         return;
     }
 
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
     ImGui::SetNextWindowSize(ImVec2(200.0f, 90.0f), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(Name(), nullptr, GetWinFlags(0, true))) {
-        ImGui::PushFont(FontLoader::GetFont(FontLoader::FontSize::header1));
+        ImGui::PushFont(FontLoader::GetFont(), static_cast<float>(FontLoader::FontSize::header1));
         ImVec2 cur = ImGui::GetCursorPos();
         ImGui::SetCursorPos(ImVec2(cur.x + 1, cur.y + 1));
         ImGui::TextColored(ImColor(0, 0, 0), "Alcohol");
@@ -147,7 +162,7 @@ void AlcoholWidget::Draw(IDirect3DDevice9*)
         static char timer[32];
         snprintf(timer, 32, "%1ld:%02ld", t / 60 % 60, t % 60);
 
-        ImGui::PushFont(FontLoader::GetFont(FontLoader::FontSize::widget_large));
+        ImGui::PushFont(FontLoader::GetFont(), static_cast<float>(FontLoader::FontSize::widget_large));
         cur = ImGui::GetCursorPos();
         ImGui::SetCursorPos(ImVec2(cur.x + 2, cur.y + 2));
         ImGui::TextColored(ImColor(0, 0, 0), timer);
@@ -164,19 +179,6 @@ void AlcoholWidget::Draw(IDirect3DDevice9*)
 
 void AlcoholWidget::DrawSettingsInternal()
 {
-    ImGui::Checkbox("Only show when drunk", &only_show_when_drunk);
-    ImGui::ShowHelp("Hides widget when not using alcohol");
+    ImGui::CheckboxWithHelp("Only show when drunk", &settings.only_show_when_drunk, "Hides widget when not using alcohol");
     ImGui::Text("Note: only visible in explorable areas.");
-}
-
-void AlcoholWidget::LoadSettings(ToolboxIni* ini)
-{
-    ToolboxWidget::LoadSettings(ini);
-    LOAD_BOOL(only_show_when_drunk);
-}
-
-void AlcoholWidget::SaveSettings(ToolboxIni* ini)
-{
-    ToolboxWidget::SaveSettings(ini);
-    SAVE_BOOL(only_show_when_drunk);
 }

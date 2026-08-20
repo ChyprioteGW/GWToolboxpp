@@ -1,12 +1,7 @@
 #pragma once
 
-#include <GWCA/Packets/StoC.h>
-
-#include <GWCA/GameEntities/Party.h>
-
-#include <CircurlarBuffer.h>
 #include <ToolboxWindow.h>
-#include <Utils/RateLimiter.h>
+#include <Utils/TextUtils.h>
 
 class TradeWindow : public ToolboxWindow {
     TradeWindow() : ToolboxWindow() { show_menubutton = can_show_in_main_window; }
@@ -23,6 +18,15 @@ public:
     [[nodiscard]] const char* Name() const override { return "Trade"; }
     [[nodiscard]] const char* Icon() const override { return ICON_FA_BALANCE_SCALE; }
 
+    struct Settings {
+        bool print_game_chat = false;
+        bool print_game_chat_asc = false;
+        bool filter_alerts = false;
+        bool filter_local_trade = false;
+        bool is_kamadan_chat = true;
+        std::string player_party_search_text;
+    };
+
     void Initialize() override;
 
     void Update(float delta) override;
@@ -30,8 +34,8 @@ public:
     void Terminate() override;
     void RegisterSettingsContent() override;
 
-    void LoadSettings(ToolboxIni* ini) override;
-    void SaveSettings(ToolboxIni* ini) override;
+    void LoadSettings(SettingsDoc& doc, ToolboxIni* legacy) override;
+    void SaveSettings(SettingsDoc& doc) override;
     void DrawSettingsInternal() override;
     void DrawChatSettings(bool ownwindow = false);
 
@@ -56,8 +60,6 @@ private:
     bool should_stop = false;
     std::thread* worker = nullptr;
 
-    static void ParseBuffer(const char* text, std::vector<std::string>& words);
-    static void ParseBuffer(std::fstream stream, std::vector<std::string>& words);
 
     static void DeleteWebSocket(easywsclient::WebSocket* ws);
     void SwitchSockets();

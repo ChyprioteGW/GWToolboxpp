@@ -18,10 +18,19 @@
 
 constexpr auto IPGEO_API_KEY = "161f3834252a4ec6988e49bb75ccd902";
 
+namespace ipgeo_api {
+    struct GeoResponse {
+        std::string city;
+        std::string country_name;
+    };
+}
+
 namespace {
     char server_ip[32];
     char server_location[255];
     bool server_string_dirty = false;
+
+    constexpr glz::opts json_opts{.error_on_unknown_keys = false};
 }
 
 static int
@@ -95,7 +104,6 @@ void ServerInfoWidget::Update(float)
         }
         current_server_info->last_update = time(nullptr);
         server_info_fetcher = std::thread([this] {
-            // Need to check details
             using namespace std::string_literals;
             const std::string url = "https://api.ipgeolocation.io/ipgeo?apiKey="s + IPGEO_API_KEY + "&ip=" + current_server_info->ip;
             int tries = 0;
@@ -110,15 +118,16 @@ void ServerInfoWidget::Update(float)
                 return;
             }
             if (!response.empty()) {
-                using Json = nlohmann::json;
-                Json json = Json::parse(response.c_str());
-                if (current_server_info->city.empty() && json["city"].is_string()) {
-                    current_server_info->city = json["city"];
+                ipgeo_api::GeoResponse geo{};
+                if (auto ec = glz::read<json_opts>(geo, response); !ec) {
+                    if (current_server_info->city.empty() && !geo.city.empty()) {
+                        current_server_info->city = std::move(geo.city);
+                    }
+                    if (current_server_info->country.empty() && !geo.country_name.empty()) {
+                        current_server_info->country = std::move(geo.country_name);
+                    }
+                    server_string_dirty = true;
                 }
-                if (current_server_info->country.empty() && json["country_name"].is_string()) {
-                    current_server_info->country = json["country_name"];
-                }
-                server_string_dirty = true;
             }
         });
     }
@@ -151,7 +160,7 @@ void ServerInfoWidget::Draw(IDirect3DDevice9*)
         snprintf(server_ip, sizeof(server_ip) - 1, "%s", current_server_info->ip.c_str());
     }
     static ImVec2 cur;
-    ImGui::PushFont(FontLoader::GetFont(FontLoader::FontSize::header1));
+    ImGui::PushFont(FontLoader::GetFont(), static_cast<float>(FontLoader::FontSize::header1));
     cur = ImGui::GetCursorPos();
     ImGui::SetCursorPos(ImVec2(cur.x + 1, cur.y + 1));
     ImGui::TextColored(ImColor(0, 0, 0), server_ip);
@@ -174,14 +183,4 @@ void ServerInfoWidget::Draw(IDirect3DDevice9*)
 void ServerInfoWidget::DrawSettingsInternal()
 {
     ImGui::Text("Displays current server IP Address and location if available");
-}
-
-void ServerInfoWidget::SaveSettings(ToolboxIni* ini)
-{
-    ToolboxWidget::SaveSettings(ini);
-}
-
-void ServerInfoWidget::LoadSettings(ToolboxIni* ini)
-{
-    ToolboxWidget::LoadSettings(ini);
 }

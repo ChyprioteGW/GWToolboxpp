@@ -11,7 +11,6 @@
 #include <ImGuiAddons.h>
 #include "MouseFix.h"
 
-#include <hidusage.h>
 #include <GWCA/Managers/UIMgr.h>
 
 namespace {
@@ -78,12 +77,11 @@ namespace {
     // This could be a patch really, but rewriting the function out is a bit more readable.
     
     bool initialized = false;
-    bool enable_cursor_fix = false;
+    MouseFix::Settings settings;
 
     bool ShouldFixCursor() {
-        return enable_cursor_fix && !GW::UI::IsInControllerMode();
+        return settings.enable_cursor_fix && !GW::UI::IsInControllerMode();
     }
-    int cursor_size = 32;
     HCURSOR current_cursor = nullptr;
     bool cursor_size_hooked = false;
     
@@ -150,7 +148,6 @@ namespace {
 
         const RAWINPUT* raw = reinterpret_cast<RAWINPUT*>(lpb);
         if ((raw->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
-            // If its a relative mouse move, process the action
             if (gw_mouse_move->move_camera) {
                 rawInputRelativePosX += raw->data.mouse.lLastX;
                 rawInputRelativePosY += raw->data.mouse.lLastY;
@@ -171,12 +168,15 @@ namespace {
             return false;
         }
         uintptr_t address = GW::Scanner::Find("\xc7\x45\xf0\x10\x00\x00\x00\xc7\x45\xf4\x02\x00\x00\x00", "xx?xxxxxx?xxxx", 0x15);
+        DEBUG_ASSERT(address);
         if(address && GW::Scanner::IsValidPtr(*(uintptr_t*)address)) {
             ProcessInput_Func = (OnProcessInput_pt)GW::Scanner::ToFunctionStart(address, 0xfff);
             HasRegisteredTrackMouseEvent = *(bool**)address;
             gw_mouse_move = (GwMouseMove*)(HasRegisteredTrackMouseEvent - 0x20);
-            SetCursorPosCenter_Func = (SetCursorPosCenter_pt)GW::Scanner::FunctionFromNearCall(GW::Scanner::FindInRange("\x89\x46\x08\xe8????", "xxxx????", 3, address, address + 0xff));
         }
+        SetCursorPosCenter_Func = (SetCursorPosCenter_pt)GW::Scanner::ToFunctionStart(GW::Scanner::FindAssertion("OsInput.cpp", "basis", 0, 0));
+        DEBUG_ASSERT(ProcessInput_Func);
+        DEBUG_ASSERT(SetCursorPosCenter_Func);
 
         GWCA_INFO("[SCAN] ProcessInput_Func = %p", ProcessInput_Func);
         GWCA_INFO("[SCAN] HasRegisteredTrackMouseEvent = %p", HasRegisteredTrackMouseEvent);
@@ -209,9 +209,6 @@ namespace {
         }
     }
 
-    /*
-     *  Logic for scaling gw cursor up or down
-     */
     HBITMAP ScaleBitmap(const HBITMAP inBitmap, const int inWidth, const int inHeight, const int outWidth, const int outHeight)
     {
         // NB: We could use GDIPlus for this logic which has better image res handling etc, but no need
@@ -219,14 +216,14 @@ namespace {
         BYTE* ppvBits = nullptr;
         BOOL bResult = 0;
         HBITMAP outBitmap = nullptr;
+        HGDIOBJ oldDestBitmap = nullptr, oldSrcBitmap = nullptr;
 
-        // create a destination bitmap and DC with size w/h
         BITMAPINFO bmi;
         memset(&bmi, 0, sizeof(bmi));
         bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
         bmi.bmiHeader.biBitCount = 32;
         bmi.bmiHeader.biWidth = outWidth;
-        bmi.bmiHeader.biHeight = outWidth;
+        bmi.bmiHeader.biHeight = outHeight;
         bmi.bmiHeader.biPlanes = 1;
 
         // Do not use CreateCompatibleBitmap otherwise api will not allocate memory for bitmap
@@ -238,7 +235,8 @@ namespace {
         if (outBitmap == nullptr) {
             goto cleanup;
         }
-        if (SelectObject(destDC, outBitmap) == nullptr) {
+        oldDestBitmap = SelectObject(destDC, outBitmap);
+        if (oldDestBitmap == nullptr) {
             goto cleanup;
         }
 
@@ -246,16 +244,23 @@ namespace {
         if (!srcDC) {
             goto cleanup;
         }
-        if (SelectObject(srcDC, inBitmap) == nullptr) {
+        oldSrcBitmap = SelectObject(srcDC, inBitmap);
+        if (oldSrcBitmap == nullptr) {
             goto cleanup;
         }
 
-        // copy and scaling to new width/height (w,h)
         if (SetStretchBltMode(destDC, WHITEONBLACK) == 0) {
             goto cleanup;
         }
         bResult = StretchBlt(destDC, 0, 0, outWidth, outHeight, srcDC, 0, 0, inWidth, inHeight, SRCCOPY);
     cleanup:
+        // a bitmap still selected into a DC can't be deleted, so restore the originals first
+        if (oldDestBitmap) {
+            SelectObject(destDC, oldDestBitmap);
+        }
+        if (oldSrcBitmap) {
+            SelectObject(srcDC, oldSrcBitmap);
+        }
         if (!bResult) {
             if (outBitmap) {
                 DeleteObject(outBitmap);
@@ -301,10 +306,15 @@ namespace {
         if (!scaledColor) {
             goto cleanup;
         }
-        icon_info.hbmColor = scaledColor;
-        icon_info.hbmMask = scaledMask;
-        new_cursor = CreateIconIndirect(&icon_info);
+        {
+            // CreateIconIndirect copies these, so the scaled bitmaps are still ours to free below
+            ICONINFO scaled_icon_info = icon_info;
+            scaled_icon_info.hbmColor = scaledColor;
+            scaled_icon_info.hbmMask = scaledMask;
+            new_cursor = CreateIconIndirect(&scaled_icon_info);
+        }
     cleanup:
+        // GetIconInfo hands out private copies of the bitmaps; failing to free them leaks 2 GDI objects per cursor change
         if (icon_info.hbmColor)
             DeleteObject(icon_info.hbmColor);
         if (icon_info.hbmMask)
@@ -333,11 +343,9 @@ namespace {
     {
         GW::Hook::EnterHook();
 
-        // Cache the cursor arguments before calling the original function
         if (bitmap_data && bitmap_mask && hotspot) {
             cached_cursor.cursor_type = cursor_type;
 
-            // Determine bitmap data size based on cursor type
             size_t bitmap_size;
             if (cursor_type == 0) {
                 bitmap_size = 32 * 32 * 4; // 32-bit color (RGBA)
@@ -349,15 +357,12 @@ namespace {
                 bitmap_size = 32 * 32 * 4; // Default to 32-bit
             }
 
-            // Cache bitmap data
             cached_cursor.bitmap_data.resize(bitmap_size);
             memcpy(cached_cursor.bitmap_data.data(), bitmap_data, bitmap_size);
 
-            // Cache mask data (always 32x32x4 for RGBA)
             cached_cursor.bitmap_mask.resize(32 * 32 * 4);
             memcpy(cached_cursor.bitmap_mask.data(), bitmap_mask, 32 * 32 * 4);
 
-            // Cache hotspot
             cached_cursor.hotspot[0] = hotspot[0];
             cached_cursor.hotspot[1] = hotspot[1];
 
@@ -366,8 +371,7 @@ namespace {
 
         ChangeCursorIcon_Ret(user_data, edx, cursor_type, bitmap_data, bitmap_mask, hotspot);
 
-        // Your existing cursor scaling logic...
-        if (cursor_size < 0 || cursor_size > 64 || cursor_size == 32) {
+        if (settings.cursor_size < 0 || settings.cursor_size > 64 || settings.cursor_size == 32) {
             return GW::Hook::LeaveHook();
         }
 
@@ -378,7 +382,7 @@ namespace {
         if (!(user_data && *cursor && *cursor != current_cursor)) {
             return GW::Hook::LeaveHook();
         }
-        const HCURSOR new_cursor = ScaleCursor(*cursor, cursor_size);
+        const HCURSOR new_cursor = ScaleCursor(*cursor, settings.cursor_size);
         if (!new_cursor) {
             return GW::Hook::LeaveHook();
         }
@@ -394,7 +398,6 @@ namespace {
         }
         *cursor = new_cursor;
         SetCursor(new_cursor);
-        // Also override the window class for the cursor
         SetClassLongA(*window_handle, GCL_HCURSOR, reinterpret_cast<LONG>(new_cursor));
         current_cursor = new_cursor;
         GW::Hook::LeaveHook();
@@ -403,7 +406,6 @@ namespace {
     void RedrawCursorIcon()
     {
         GW::GameThread::Enqueue([] {
-            // Force redraw
             const auto user_data = Win32WindowUserData::Instance();
             current_cursor = nullptr;
             if (user_data && ChangeCursorIcon_Func && cached_cursor.is_valid) {
@@ -416,7 +418,7 @@ namespace {
 
     void SetCursorSize(const int new_size)
     {
-        cursor_size = new_size;
+        settings.cursor_size = new_size;
         RedrawCursorIcon();
     }
 
@@ -428,7 +430,7 @@ namespace {
             CursorFixEnable(false);
             break;
         case GW::UI::UIMessage::kMapLoaded:
-            CursorFixEnable(enable_cursor_fix);
+            CursorFixEnable(settings.enable_cursor_fix);
             break;
         }
     }
@@ -438,6 +440,7 @@ namespace {
 void MouseFix::Initialize()
 {
     ToolboxModule::Initialize();
+    SettingsRegistry::Register(this, settings);
 
     ChangeCursorIcon_Func = (ChangeCursorIcon_pt)GW::Scanner::ToFunctionStart(GW::Scanner::Find("\x80\x7e\x01\x80", "xxxx"));
     if (ChangeCursorIcon_Func) {
@@ -455,21 +458,21 @@ void MouseFix::Initialize()
     };
 
     for (const auto ui_message : ui_messages) {
-        GW::UI::RegisterUIMessageCallback(&UIMessage_HookEntry, ui_message, OnUIMessage);
+        RegisterUIMessageCallback(&UIMessage_HookEntry, ui_message, OnUIMessage);
     }
 }
 
-void MouseFix::LoadSettings(ToolboxIni* ini)
+void MouseFix::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
-    LOAD_BOOL(enable_cursor_fix);
-    SetCursorSize(ini->GetLongValue(Name(), VAR_NAME(cursor_size), cursor_size));
-    RedrawCursorIcon();
+    ToolboxModule::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
+    SetCursorSize(settings.cursor_size);
 }
 
-void MouseFix::SaveSettings(ToolboxIni* ini)
+void MouseFix::SaveSettings(SettingsDoc& doc)
 {
-    SAVE_BOOL(enable_cursor_fix);
-    SAVE_UINT(cursor_size);
+    ToolboxModule::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 }
 
 void MouseFix::Terminate()
@@ -485,14 +488,14 @@ void MouseFix::Terminate()
 
 void MouseFix::DrawSettingsInternal()
 {
-    if (ImGui::Checkbox("Enable cursor fix", &enable_cursor_fix)) {
-        CursorFixEnable(enable_cursor_fix);
+    if (ImGui::Checkbox("Enable cursor fix", &settings.enable_cursor_fix)) {
+        CursorFixEnable(settings.enable_cursor_fix);
     }
-    ImGui::SliderInt("Guild Wars cursor size", &cursor_size, 16, 64);
+    ImGui::SliderInt("Guild Wars cursor size", &settings.cursor_size, 16, 64);
     ImGui::ShowHelp("Sizes other than 32 might lead the the cursor disappearing at random.\n"
         "Right click to make the cursor dis- and reappear for this to take effect.");
     if (ImGui::IsItemDeactivatedAfterEdit()) {
-        SetCursorSize(cursor_size);
+        SetCursorSize(settings.cursor_size);
         RedrawCursorIcon();
     }
     if (ImGui::Button("Reset")) {
@@ -507,7 +510,7 @@ bool MouseFix::WndProc(const UINT Message, const WPARAM wParam, const LPARAM lPa
         return false;
     }
     if (!initialized) {
-        CursorFixEnable(enable_cursor_fix);
+        CursorFixEnable(settings.enable_cursor_fix);
         initialized = true;
     }
     CursorFixWndProc(Message, wParam, lParam);

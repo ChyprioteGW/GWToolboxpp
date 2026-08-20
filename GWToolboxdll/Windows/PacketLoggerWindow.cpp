@@ -15,6 +15,8 @@
 #include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/GameThreadMgr.h>
 
+#include <Defines.h>
+
 #include <Logger.h>
 #include <Utils/GuiUtils.h>
 
@@ -23,8 +25,24 @@
 
 #include <GWToolbox.h>
 #include <Utils/TextUtils.h>
+#include <Utils/TextUtils_Time.h>
 #include <Utils/ToolboxUtils.h>
+
+namespace packetlogger_export {
+    struct MapInfoJson {
+        std::string name;
+        std::string description;
+        uint32_t campaign = 0;
+        uint32_t type = 0;
+        uint32_t region = 0;
+        uint32_t flags = 0;
+        uint32_t continent = 0;
+    };
+}
+
 namespace {
+    PacketLoggerWindow::Settings settings;
+
     wchar_t* GetMessageCore()
     {
         GW::Array<wchar_t>* buff = &GW::GetGameContext()->world->message_buff;
@@ -38,21 +56,17 @@ namespace {
         std::wstring description;
         GW::AreaInfo* map_info{};
 
-        nlohmann::json ToJson() const
+        packetlogger_export::MapInfoJson ToJson() const
         {
-            nlohmann::json json;
-            if (!name.empty()) {
-                json["name"] = TextUtils::WStringToString(name);
-            }
-            if (!description.empty()) {
-                json["description"] = TextUtils::WStringToString(description);
-            }
-            json["campaign"] = map_info->campaign;
-            json["type"] = map_info->type;
-            json["region"] = map_info->region;
-            json["flags"] = map_info->flags;
-            json["continent"] = map_info->continent;
-            return json;
+            return {
+                .name = TextUtils::WStringToString(name),
+                .description = TextUtils::WStringToString(description),
+                .campaign = static_cast<uint32_t>(map_info->campaign),
+                .type = static_cast<uint32_t>(map_info->type),
+                .region = static_cast<uint32_t>(map_info->region),
+                .flags = static_cast<uint32_t>(map_info->flags),
+                .continent = static_cast<uint32_t>(map_info->continent),
+            };
         };
     };
 
@@ -81,9 +95,9 @@ namespace {
 
     void ExportMapInfo()
     {
-        nlohmann::json json;
+        std::map<std::string, packetlogger_export::MapInfoJson> output;
         for (const auto& it : maps) {
-            json[it.first] = it.second->ToJson();
+            output.emplace(std::to_string(it.first), it.second->ToJson());
             delete it.second;
         }
         maps.clear();
@@ -93,7 +107,7 @@ namespace {
         }
 
         std::ofstream out(file_location);
-        out << json.dump();
+        out << glz::write_json(output).value_or(std::string{});
         out.close();
         Log::Info("Maps exported to %ls", file_location.c_str());
     }
@@ -172,6 +186,7 @@ namespace {
     StoCHandlerArray* GetStoCHandlerArray() {
 
         uintptr_t address = GW::Scanner::Find("\x75\x04\x33\xC0\x5D\xC3\x8B\x41\x08\xA8\x01\x75", "xxxxxxxxxxxx", -6);
+        DEBUG_ASSERT(address);
         const uintptr_t StoCHandler_Addr = *(uintptr_t*)address;
 
         struct GameServer {
@@ -578,43 +593,42 @@ std::string PacketLoggerWindow::PadLeft(std::string input, const uint8_t count, 
 
 std::string PacketLoggerWindow::PrefixTimestamp(std::string message) const
 {
-    if (timestamp_type == TimestampType_None) {
+    if (settings.timestamp_type == TimestampType_None) {
         return message;
     }
 
-    switch (timestamp_type) {
+    switch (settings.timestamp_type) {
         case TimestampType_Local: {
-            SYSTEMTIME time;
-            GetLocalTime(&time);
+            const auto time = TextUtils::Time::GetCurrentSystemTime();
             bool prependColon = false;
             char t[4];
             std::string time_s = "[";
-            if (timestamp_show_hours) {
-                snprintf(t, 4, "%02d", time.wHour);
+            if (settings.timestamp_show_hours) {
+                snprintf(t, 4, "%02d", time.hour);
                 time_s.append(t);
                 prependColon = true;
             }
-            if (timestamp_show_minutes) {
+            if (settings.timestamp_show_minutes) {
                 if (prependColon) {
                     time_s.append(":");
                 }
-                snprintf(t, 4, "%02d", time.wMinute);
+                snprintf(t, 4, "%02d", time.minute);
                 time_s.append(t);
                 prependColon = true;
             }
-            if (timestamp_show_seconds) {
+            if (settings.timestamp_show_seconds) {
                 if (prependColon) {
                     time_s.append(":");
                 }
-                snprintf(t, 4, "%02d", time.wSecond);
+                snprintf(t, 4, "%02d", time.second);
                 time_s.append(t);
                 prependColon = true;
             }
-            if (timestamp_show_milliseconds) {
+            if (settings.timestamp_show_milliseconds) {
                 if (prependColon) {
                     time_s.append(".");
                 }
-                snprintf(t, 4, "%03d", time.wMilliseconds);
+                snprintf(t, 4, "%03d", time.millisecond);
                 time_s.append(t);
             }
             return time_s + "] " + message;
@@ -629,25 +643,25 @@ std::string PacketLoggerWindow::PrefixTimestamp(std::string message) const
             mins -= std::chrono::duration_cast<std::chrono::minutes>(hours);
             bool prependColon = false;
             std::string time_s = "[";
-            if (timestamp_show_hours) {
+            if (settings.timestamp_show_hours) {
                 time_s.append(PadLeft(std::to_string(hours.count()), 2, '0'));
                 prependColon = true;
             }
-            if (timestamp_show_minutes) {
+            if (settings.timestamp_show_minutes) {
                 if (prependColon) {
                     time_s.append(":");
                 }
                 time_s.append(PadLeft(std::to_string(mins.count()), 2, '0'));
                 prependColon = true;
             }
-            if (timestamp_show_seconds) {
+            if (settings.timestamp_show_seconds) {
                 if (prependColon) {
                     time_s.append(":");
                 }
                 time_s.append(PadLeft(std::to_string(secs.count()), 2, '0'));
                 prependColon = true;
             }
-            if (timestamp_show_milliseconds) {
+            if (settings.timestamp_show_milliseconds) {
                 if (prependColon) {
                     time_s.append(".");
                 }
@@ -678,7 +692,6 @@ void PacketLoggerWindow::SaveMessageLog() const
     const auto filename = Resources::GetPath(L"message_log.csv");
     std::wofstream my_file(filename);
 
-    // Send column names to the stream
     for (const auto& it : message_log) {
         if (!it.second || !it.second->length()) {
             continue;
@@ -688,7 +701,6 @@ void PacketLoggerWindow::SaveMessageLog() const
         my_file << it.second->c_str();
         my_file << "\n";
     }
-    // Close the file
     my_file.close();
 }
 
@@ -725,8 +737,7 @@ void PacketLoggerWindow::Draw(IDirect3DDevice9*)
     ImGui::SameLine();
     ImGui::Checkbox("Log Packet Content", &log_packet_content);
     ImGui::SameLine();
-    ImGui::Checkbox("Auto ignore incoming packets", &auto_ignore_packets);
-    ImGui::ShowHelp("While ticked, any StoC packets received will be added to the ignore list.");
+    ImGui::CheckboxWithHelp("Auto ignore incoming packets", &auto_ignore_packets, "While ticked, any StoC packets received will be added to the ignore list.");
     /*if ( ImGui::Button("Export Map Info")) {
         if (maps.empty()) {
             FetchMapInfo();
@@ -737,8 +748,7 @@ void PacketLoggerWindow::Draw(IDirect3DDevice9*)
     }
     ImGui::ShowHelp("Export current map info to disk");
     */
-    ImGui::Checkbox("Log NPC Dialogs", &log_npc_dialogs);
-    ImGui::ShowHelp("Log encoded strings and their translated output to debug console");
+    ImGui::CheckboxWithHelp("Log NPC Dialogs", &log_npc_dialogs, "Log encoded strings and their translated output to debug console");
     if (ImGui::CollapsingHeader("Ignored Packets")) {
         if (ImGui::Button("Select All")) {
             for (size_t i = 0; i < game_server_handler.size(); i++) {
@@ -758,7 +768,7 @@ void PacketLoggerWindow::Draw(IDirect3DDevice9*)
                 ImGui::NewLine();
             }
             ImGui::SameLine(offset, 0);
-            offset += 80.0f * ImGui::GetIO().FontGlobalScale;
+            offset += 80.0f * ImGui::FontScale();
             char buf[30];
             sprintf(buf, "%zu###ignore_packet_%zu", i, i);
             bool p = ignored_packets[i];
@@ -789,7 +799,7 @@ void PacketLoggerWindow::Draw(IDirect3DDevice9*)
                 ImGui::NewLine();
             }
             ImGui::SameLine(offset, 0);
-            offset += 80.0f * ImGui::GetIO().FontGlobalScale;
+            offset += 80.0f * ImGui::FontScale();
             char buf[30];
             sprintf(buf, "%zu###block_packet_%zu", i, i);
             bool p = blocked_packets[i];
@@ -807,6 +817,7 @@ void PacketLoggerWindow::Draw(IDirect3DDevice9*)
 void PacketLoggerWindow::Initialize()
 {
     ToolboxWindow::Initialize();
+    SettingsRegistry::Register(this, settings);
     GW::GameThread::Enqueue([] {
         InitStoC();
         },true);
@@ -884,17 +895,21 @@ void PacketLoggerWindow::Update(const float)
     }
 }
 
-void PacketLoggerWindow::LoadSettings(ToolboxIni* ini)
+void PacketLoggerWindow::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
-    ToolboxWindow::LoadSettings(ini);
+    ToolboxWindow::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
 
-    LOAD_BOOL(timestamp_type);
-    LOAD_BOOL(timestamp_show_hours);
-    LOAD_BOOL(timestamp_show_seconds);
-    LOAD_BOOL(timestamp_show_milliseconds);
+    // The legacy ini stored timestamp_type via SetBoolValue; re-read it as a bool to match the old load behaviour
+    if (!doc.Has(Name(), VAR_NAME(timestamp_type)) && legacy && legacy->KeyExists(Name(), VAR_NAME(timestamp_type))) {
+        settings.timestamp_type = legacy->GetBoolValue(Name(), VAR_NAME(timestamp_type), settings.timestamp_type != TimestampType_None) ? 1 : 0;
+    }
 
-    const char* ignored_packets_bits = ini->GetValue(Name(), VAR_NAME(ignored_packets), "-");
-    if (strcmp(ignored_packets_bits, "-") == 0) {
+    std::string ignored_packets_bits;
+    if (!doc.Get(Name(), VAR_NAME(ignored_packets), ignored_packets_bits) && legacy) {
+        ignored_packets_bits = legacy->GetValue(Name(), VAR_NAME(ignored_packets), "-");
+    }
+    if (ignored_packets_bits.empty() || ignored_packets_bits == "-") {
         return;
     }
     const std::bitset<packet_max> ignored_packets_bitset(ignored_packets_bits);
@@ -903,20 +918,16 @@ void PacketLoggerWindow::LoadSettings(ToolboxIni* ini)
     }
 }
 
-void PacketLoggerWindow::SaveSettings(ToolboxIni* ini)
+void PacketLoggerWindow::SaveSettings(SettingsDoc& doc)
 {
-    ToolboxWindow::SaveSettings(ini);
-
-    SAVE_BOOL(timestamp_type);
-    SAVE_BOOL(timestamp_show_hours);
-    SAVE_BOOL(timestamp_show_seconds);
-    SAVE_BOOL(timestamp_show_milliseconds);
+    ToolboxWindow::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 
     std::bitset<packet_max> ignored_packets_bitset;
     for (size_t i = 0; i < packet_max; i++) {
         ignored_packets_bitset[i] = ignored_packets[i] ? 1 : 0;
     }
-    ini->SetValue(Name(), VAR_NAME(ignored_packets), ignored_packets_bitset.to_string().c_str());
+    doc.Set(Name(), VAR_NAME(ignored_packets), ignored_packets_bitset.to_string());
     SaveMessageLog();
     ClearMessageLog();
 }
@@ -932,6 +943,7 @@ void PacketLoggerWindow::Disable()
     logger_enabled = false;
 }
 void PacketLoggerWindow::Terminate() {
+    ToolboxWindow::Terminate();
     ClearMessageLog();
 }
 void PacketLoggerWindow::Enable()
@@ -950,11 +962,11 @@ void PacketLoggerWindow::Enable()
 }
 void PacketLoggerWindow::DrawSettingsInternal()
 {
-    ImGui::RadioButton("No timestamp", &timestamp_type, TimestampType_None);
-    ImGui::RadioButton("Local timestmap", &timestamp_type, TimestampType_Local);
-    ImGui::RadioButton("Instance timestamp", &timestamp_type, TimestampType_Instance);
-    ImGui::Checkbox("Show hours", &timestamp_show_hours);
-    ImGui::Checkbox("Show minutes", &timestamp_show_minutes);
-    ImGui::Checkbox("Show seconds", &timestamp_show_seconds);
-    ImGui::Checkbox("Show milliseconds", &timestamp_show_milliseconds);
+    ImGui::RadioButton("No timestamp", &settings.timestamp_type, TimestampType_None);
+    ImGui::RadioButton("Local timestmap", &settings.timestamp_type, TimestampType_Local);
+    ImGui::RadioButton("Instance timestamp", &settings.timestamp_type, TimestampType_Instance);
+    ImGui::Checkbox("Show hours", &settings.timestamp_show_hours);
+    ImGui::Checkbox("Show minutes", &settings.timestamp_show_minutes);
+    ImGui::Checkbox("Show seconds", &settings.timestamp_show_seconds);
+    ImGui::Checkbox("Show milliseconds", &settings.timestamp_show_milliseconds);
 }

@@ -17,12 +17,26 @@ public:
     [[nodiscard]] const char* Icon() const override { return ICON_FA_COINS; }
     [[nodiscard]] const char* SettingsName() const override { return "Item Settings"; }
 
+    struct Settings {
+        bool hide_player_white = false;
+        bool hide_player_blue = false;
+        bool hide_player_purple = false;
+        bool hide_player_gold = false;
+        bool hide_player_green = false;
+        bool hide_party_white = false;
+        bool hide_party_blue = false;
+        bool hide_party_purple = false;
+        bool hide_party_gold = false;
+        bool hide_party_green = false;
+        bool track_drops = false;
+    };
+
     void Initialize() override;
     void Update(float) override;
     void SignalTerminate() override;
     bool CanTerminate() override;
-    void LoadSettings(ToolboxIni* ini) override;
-    void SaveSettings(ToolboxIni* ini) override;
+    void LoadSettings(SettingsDoc& doc, ToolboxIni* legacy) override;
+    void SaveSettings(SettingsDoc& doc) override;
     void DrawSettingsInternal() override;
 
     struct PendingDrop {
@@ -31,6 +45,10 @@ public:
         IDirect3DTexture9** icon = 0;
         wchar_t* item_name_enc = 0;
         GW::Constants::MapID map_id = GW::Constants::MapID::None;
+
+        // ModelFileID is the unique skin identifier; useful when one display
+        // name covers many skins (e.g. "Storm Artifact" has 42+ variants).
+        uint32_t model_file_id = 0;
 
         uint16_t value = 0;
 
@@ -54,7 +72,7 @@ public:
         static const wchar_t* GetCSVHeader();
         GuiUtils::EncString* GetItemName();
     };
-    static_assert(sizeof(PendingDrop) == 40);
+    static_assert(sizeof(PendingDrop) == 48);
 
     std::vector<PendingDrop*>& GetDropHistory();
     int GetTotalGoldValue();

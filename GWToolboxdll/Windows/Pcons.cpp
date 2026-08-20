@@ -26,15 +26,18 @@
 
 #include <Utils/FontLoader.h>
 #include <Utils/TextUtils.h>
+#include <Utils/ToolboxUtils.h>
 
 #include "Color.h"
+
 
 float Pcon::size = 46.0f;
 int Pcon::pcons_delay = 5000;
 int Pcon::lunar_delay = 500;
 bool Pcon::disable_when_not_found = true;
 bool Pcon::refill_if_below_threshold = false;
-Color Pcon::enabled_bg_color = Colors::ARGB(102, 0, 255, 0);
+bool Pcon::always_refill_pcons = false;
+Colors::SettingColor Pcon::enabled_bg_color = Colors::ARGB(102, 0, 255, 0);
 
 DWORD Pcon::alcohol_level = 0;
 bool Pcon::suppress_drunk_effect = false;
@@ -96,7 +99,7 @@ void Pcon::SetEnabled(const bool b)
     }
     *enabled = b;
     ResetCounts();
-    Refill(refill_if_below_threshold && IsEnabled() && PconsWindow::Instance().GetEnabled());
+    Refill(refill_if_below_threshold && IsEnabled() && (PconsWindow::Instance().GetEnabled() || always_refill_pcons));
 }
 
 bool Pcon::IsVisible() const
@@ -128,7 +131,7 @@ void Pcon::Draw(IDirect3DDevice9*)
     if (!(t && *t)) return;
     const ImVec2 pos = ImGui::GetCursorPos();
     const ImVec2 s(size, size);
-    const ImVec4 bg = IsEnabled() ? ImColor(enabled_bg_color).Value : ImVec4(0, 0, 0, 0);
+    const ImVec4 bg = IsEnabled() ? ImColor(enabled_bg_color.value).Value : ImVec4(0, 0, 0, 0);
     constexpr ImVec4 tint(1, 1, 1, 1);
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
     if (ImGui::ImageButton(*t, s, uv0, uv1, 0, bg, tint)) {
@@ -141,9 +144,8 @@ void Pcon::Draw(IDirect3DDevice9*)
         ImGui::SetTooltip(out);
     }
     if (maptype != GW::Constants::InstanceType::Loading) {
-        ImFont* f = FontLoader::GetFont(FontLoader::FontSize::header1);
         const ImVec2 nextPos = ImGui::GetCursorPos();
-        ImGui::PushFont(f);
+        ImGui::PushFont(FontLoader::GetFont(), static_cast<float>(FontLoader::FontSize::header1));
         ImVec4 color;
         if (quantity == 0) {
             color = ImVec4(1, 0, 0, 1);
@@ -161,7 +163,7 @@ void Pcon::Draw(IDirect3DDevice9*)
         ImGui::TextColored(color, "%d", quantity);
         ImGui::PopFont();
 
-        if (maptype == GW::Constants::InstanceType::Outpost && PconsWindow::Instance().show_storage_quantity) {
+        if (maptype == GW::Constants::InstanceType::Outpost && PconsWindow::Instance().settings.show_storage_quantity) {
             ImGui::SetCursorPos(ImVec2(pos.x + 3, nextPos.y - ImGui::GetTextLineHeight()));
             ImGui::TextColored(ImVec4(0, 0, 0, 1), "%d", quantity_storage);
             ImGui::SetCursorPos(ImVec2(pos.x + 2, nextPos.y - ImGui::GetTextLineHeight() - 1));
@@ -181,19 +183,16 @@ void Pcon::Terminate()
 void Pcon::Update(int delay)
 {
     if (mapid != GW::Map::GetMapID() || maptype != GW::Map::GetInstanceType()) {
-        // Map changed; reset vars
         mapid = GW::Map::GetMapID();
         maptype = GW::Map::GetInstanceType();
         SetPlayerName();
         ResetCounts();
-        Refill(refill_if_below_threshold && IsEnabled() && PconsWindow::Instance().GetEnabled());
+        Refill(refill_if_below_threshold && IsEnabled() && (PconsWindow::Instance().GetEnabled() || always_refill_pcons));
     }
-    // Refill pcons if needed.
     UpdateRefill();
     if (maptype == GW::Constants::InstanceType::Loading || GW::Map::GetIsObserving()) {
         return;
     }
-    // Check pcon count in inventory
     if (!pcon_quantity_checked) {
         const auto qty = CheckInventory();
         if (qty < 0) {
@@ -202,7 +201,7 @@ void Pcon::Update(int delay)
         quantity = qty;
         if (maptype == GW::Constants::InstanceType::Outpost) {
             quantity_storage = CheckInventory(nullptr, nullptr, static_cast<int>(GW::Constants::Bag::Storage_1), static_cast<int>(GW::Constants::Bag::Storage_14));
-            if (IsEnabled() && PconsWindow::Instance().GetEnabled() && !refilling) {
+            if (IsEnabled() && (PconsWindow::Instance().GetEnabled() || always_refill_pcons) && !refilling) {
                 // Only warn user of low pcon count if is enabled and we're in an outpost.
                 if (quantity == 0) {
                     Log::Error("No more %s items found", chat.c_str());
@@ -235,7 +234,7 @@ void Pcon::Update(int delay)
 
 void Pcon::ItemUpdated(const GW::Item* item)
 {
-    if (item && QuantityForEach(item))
+    if (item && PointsPerUse(item))
         ResetCounts();
 }
 
@@ -271,7 +270,6 @@ void Pcon::AfterUsed(const bool used, const int qty)
         if (used) {
             timer = TIMER_INIT();
             if (quantity == 0) {
-                // if we just used the last one
                 mapid = GW::Map::GetMapID();
                 maptype = GW::Map::GetInstanceType();
                 Log::Warning("Just used the last %s", chat.c_str());
@@ -296,12 +294,11 @@ void Pcon::AfterUsed(const bool used, const int qty)
     }
 }
 
-GW::Item* Pcon::FindVacantStackOrSlotInInventory(const GW::Item* likeItem)
+bool Pcon::FindVacantStackOrSlotInInventory(const GW::Item* likeItem, GW::Item* result)
 {
-    // Scan bags, find an incomplete stack, or otherwise an empty slot.
     GW::Bag** bags = GW::Items::GetBagArray();
     if (bags == nullptr) {
-        return nullptr;
+        return false;
     }
     auto emptySlotIdx = static_cast<size_t>(-1);
     GW::Bag* emptyBag = nullptr;
@@ -321,7 +318,6 @@ GW::Item* Pcon::FindVacantStackOrSlotInInventory(const GW::Item* likeItem)
             const size_t slotIndex = i - 1;
             GW::Item* item = items[slotIndex];
             if (!item || item == nullptr) {
-                // Reserve this slot for later
                 if (!emptyBag && ReserveSlotForMove(bag->index, slotIndex)) {
                     emptySlotIdx = slotIndex;
                     emptyBag = bag;
@@ -342,19 +338,20 @@ GW::Item* Pcon::FindVacantStackOrSlotInInventory(const GW::Item* likeItem)
                 {
                     UnreserveSlotForMove(emptyBag->index, emptySlotIdx);
                 }
-                return item; // Found a stack with space.
+                *result = *item;
+                return true; // Found a stack with space.
             }
         }
     }
     if (!emptyBag) {
-        return nullptr;
+        return false;
     }
-    const auto item = new GW::Item(); // Create a "fake" item...
-    item->bag = emptyBag;             // ...that belongs in the empty bag/slot we found...
-    item->slot = static_cast<uint8_t>(emptySlotIdx);
-    item->quantity = 0; // ...with 250 available slots.
-    item->item_id = 0;  // item_id to 0 for comparison
-    return item;
+    memset(result, 0, sizeof(*result)); // Create a "fake" item...
+    result->bag = emptyBag;           // ...that belongs in the empty bag/slot we found...
+    result->slot = static_cast<uint8_t>(emptySlotIdx);
+    result->quantity = 0; // ...with 250 available slots.
+    result->item_id = 0;  // item_id to 0 for comparison
+    return true;
 }
 
 uint32_t Pcon::MoveItem(const GW::Item* item, GW::Bag* bag, const size_t slot, size_t quantity)
@@ -377,7 +374,7 @@ uint32_t Pcon::MoveItem(const GW::Item* item, GW::Bag* bag, const size_t slot, s
     if (quantity > 1 && vacantQuantity < quantity) {
         quantity = vacantQuantity;
     }
-    GW::Items::MoveItem(item, bag, slot, quantity);
+    ASSERT(GW::Items::MoveItem(item, bag, slot, quantity));
     return quantity;
 }
 
@@ -388,15 +385,46 @@ void Pcon::Refill(const bool do_refill)
     }
     refilling = do_refill;
     if (!refilling) {
-        if (pending_move_to_bag) {
-            UnreserveSlotForMove(pending_move_to_bag->index, pending_move_to_slot);
+        if (const auto bag = GW::Items::GetBag(pending_move_to_bag)) {
+            UnreserveSlotForMove(bag->index, pending_move_to_slot);
         }
-        pending_move_to_bag = nullptr;
+        pending_move_to_bag = GW::Constants::Bag::None;
         pending_move_to_slot = 0;
         pending_move_to_quantity = 0;
+        pending_move_to_started = 0;
         return;
     }
     ResetCounts();
+}
+
+std::vector<DWORD> Pcon::GetPrioritizedModelIdsFromInventory() const
+{
+    std::vector<DWORD> prioritized_ids;
+    GW::Bag** bags = GW::Items::GetBagArray();
+    if (!bags) {
+        return prioritized_ids;
+    }
+    for (auto bagIndex = static_cast<size_t>(GW::Constants::Bag::Backpack);
+         bagIndex <= static_cast<size_t>(GW::Constants::Bag::Bag_2); ++bagIndex) {
+        GW::Bag* storageBag = bags[bagIndex];
+        if (!storageBag) {
+            continue; // No bag, skip
+        }
+        GW::ItemArray& items = storageBag->items;
+        if (!items.valid()) {
+            continue; // No item array, skip
+        }
+        for (size_t i = 0; i < items.size(); i++) {
+            const GW::Item* item = items[i];
+            if (!item || PointsPerUse(item) < 1) {
+                continue;
+            }
+            if (std::ranges::find(prioritized_ids, item->model_id) == prioritized_ids.end()) {
+                prioritized_ids.push_back(item->model_id);
+            }
+        }
+    }
+    return prioritized_ids;
 }
 
 void Pcon::UpdateRefill()
@@ -409,9 +437,18 @@ void Pcon::UpdateRefill()
         pcon_quantity_checked = false;
         return;
     }
-    if (pending_move_to_quantity) {
-        const GW::Item* item = GW::Items::GetItemBySlot(pending_move_to_bag, pending_move_to_slot + 1);
-        if (!item || !QuantityForEach(item) || item->quantity != pending_move_to_quantity) {
+    if (GW::UI::IsLoadingScreenShown()) {
+        return;
+    }
+    if (pending_move_to_started) {
+        if (TIMER_DIFF(pending_move_to_started) > 20000) {
+            Log::Warning("Timed out refilling pcon %s", chat.c_str());
+            Refill(false);
+            pcon_quantity_checked = false;
+            return;
+        }
+        const GW::Item* item = GW::Items::GetItemBySlot(GW::Items::GetBag(pending_move_to_bag), pending_move_to_slot + 1);
+        if (!item || !PointsPerUse(item) || item->quantity != pending_move_to_quantity) {
             return; // Still waiting for move.
         }
         UnreserveSlotForMove(item->bag->index, item->slot);
@@ -430,46 +467,63 @@ void Pcon::UpdateRefill()
         pcon_quantity_checked = false;
         return;
     }
-    for (auto bagIndex = static_cast<size_t>(GW::Constants::Bag::Storage_1); bagIndex <= static_cast<size_t>(GW::Constants::Bag::Storage_14); ++bagIndex) {
-        GW::Bag* storageBag = bags[bagIndex];
-        if (storageBag == nullptr) {
-            continue; // No bag, skip
+
+    // Lambda that scans storage for a matching item and moves it to inventory.
+    // If preferred_model_id != 0, only items with that model_id are considered.
+    // Returns true if a move was initiated, false if no matching item was found.
+    auto try_move_from_storage = [&](DWORD preferred_model_id) -> bool {
+        GW::Item inventoryItem;
+        for (auto bagIndex = static_cast<size_t>(GW::Constants::Bag::Storage_1); bagIndex <= static_cast<size_t>(GW::Constants::Bag::Storage_14); ++bagIndex) {
+            GW::Bag* storageBag = bags[bagIndex];
+            if (storageBag == nullptr) {
+                continue; // No bag, skip
+            }
+            GW::ItemArray& storageItems = storageBag->items;
+            if (!storageItems.valid()) {
+                continue; // No item array, skip
+            }
+            for (size_t i = 0; i < storageItems.size() && storageItems.valid(); i++) {
+                const GW::Item* storageItem = storageItems[i];
+                if (storageItem == nullptr) {
+                    continue; // No item, skip
+                }
+                if (preferred_model_id != 0 && storageItem->model_id != preferred_model_id) {
+                    continue;
+                }
+                const size_t points_per_item = PointsPerUse(storageItem);
+                if (points_per_item < 1) {
+                    continue; // This is not the pcon you're looking for...
+                }
+                if (!FindVacantStackOrSlotInInventory(storageItem, &inventoryItem)) { // Now find a slot in inventory to move them to.
+                    printf("No more space for %s", chat.c_str());
+                    Refill(false);
+                    pcon_quantity_checked = false;
+                    return true; // Signal that we handled the situation (no space).
+                }
+                auto quantity_to_move = static_cast<size_t>(ceil(static_cast<float>(points_needed) / static_cast<float>(points_per_item)));
+                if (quantity_to_move > storageItem->quantity) {
+                    quantity_to_move = storageItem->quantity;
+                }
+                const size_t slot_to = inventoryItem.slot;
+                GW::Bag* bag_to = inventoryItem.bag;
+                pending_move_to_quantity = inventoryItem.quantity + MoveItem(storageItem, bag_to, slot_to, quantity_to_move);
+                pending_move_to_bag = bag_to->bag_id();
+                pending_move_to_started = TIMER_INIT();
+                pending_move_to_slot = slot_to;
+                return true;
+            }
         }
-        GW::ItemArray& storageItems = storageBag->items;
-        if (!storageItems.valid()) {
-            continue; // No item array, skip
-        }
-        for (size_t i = 0; i < storageItems.size() && storageItems.valid(); i++) {
-            const GW::Item* storageItem = storageItems[i];
-            if (storageItem == nullptr) {
-                continue; // No item, skip
-            }
-            const size_t points_per_item = QuantityForEach(storageItem);
-            if (points_per_item < 1) {
-                continue; // This is not the pcon you're looking for...
-            }
-            const GW::Item* inventoryItem = FindVacantStackOrSlotInInventory(storageItem); // Now find a slot in inventory to move them to.
-            if (inventoryItem == nullptr) {
-                printf("No more space for %s", chat.c_str());
-                Refill(false);
-                pcon_quantity_checked = false;
-                return;
-            }
-            auto quantity_to_move = static_cast<size_t>(ceil(static_cast<float>(points_needed) / static_cast<float>(points_per_item)));
-            if (quantity_to_move > storageItem->quantity) {
-                quantity_to_move = storageItem->quantity;
-            }
-            const size_t slot_to = inventoryItem->slot;
-            GW::Bag* bag_to = inventoryItem->bag;
-            pending_move_to_quantity = inventoryItem->quantity + MoveItem(storageItem, bag_to, slot_to, quantity_to_move);
-            if (inventoryItem->quantity == 0) {
-                delete inventoryItem; // Empty slot was returned; free memory here.
-            }
-            pending_move_to_bag = bag_to;
-            pending_move_to_slot = slot_to;
+        return false;
+    };
+
+    const auto prioritized_ids = GetPrioritizedModelIdsFromInventory();
+    for (const DWORD model_id : prioritized_ids) {
+        if (try_move_from_storage(model_id)) {
             return;
         }
     }
+    // Fallback: any matching item in storage order (e.g. inventory is empty).
+    try_move_from_storage(0);
 }
 
 int Pcon::CheckInventory(bool* used, size_t* used_qty_ptr, const size_t from_bag,
@@ -495,7 +549,7 @@ int Pcon::CheckInventory(bool* used, size_t* used_qty_ptr, const size_t from_bag
             if (item == nullptr) {
                 continue; // No item, skip
             }
-            const size_t qtyea = QuantityForEach(item);
+            const size_t qtyea = PointsPerUse(item);
             if (qtyea < 1) {
                 continue; // This is not the pcon you're looking for...
             }
@@ -503,7 +557,7 @@ int Pcon::CheckInventory(bool* used, size_t* used_qty_ptr, const size_t from_bag
                 *used = true;
                 used_qty = qtyea;
             }
-            count += qtyea * item->quantity;
+            count += qtyea * GW::Items::GetUses(item);
         }
     }
     if (used_qty_ptr) {
@@ -526,6 +580,34 @@ bool* Pcon::GetSettingsByName(const wchar_t* name)
     return settings_by_charname[name];
 }
 
+void Pcon::LoadSettings(const SettingsDoc& doc, const char* section, const ToolboxIni* legacy)
+{
+    Settings state;
+    if (!doc.Get(section, ini, state)) {
+        if (legacy) {
+            LoadSettings(legacy, section);
+        }
+        return;
+    }
+    threshold = state.threshold;
+    visible = state.visible;
+    for (const auto& [charname, active] : state.active) {
+        *GetSettingsByName(TextUtils::StringToWString(charname).c_str()) = active;
+    }
+}
+
+void Pcon::SaveSettings(SettingsDoc& doc, const char* section) const
+{
+    Settings state{.threshold = threshold, .visible = visible};
+    for (const auto& [charname, active] : settings_by_charname) {
+        if (charname.empty()) {
+            continue;
+        }
+        state.active[TextUtils::WStringToString(charname)] = *active;
+    }
+    doc.Set(section, ini, state);
+}
+
 void Pcon::LoadSettings(const ToolboxIni* inifile, const char* section)
 {
     char buf_active[256];
@@ -540,12 +622,12 @@ void Pcon::LoadSettings(const ToolboxIni* inifile, const char* section)
     *def = inifile->GetBoolValue(section, buf_active, *def);
     visible = inifile->GetBoolValue(section, buf_visible, visible);
 
-    ToolboxIni::TNamesDepend entries;
+    TNamesDepend entries;
     inifile->GetAllSections(entries);
     std::string sectionsub(section);
     sectionsub += ':';
     const size_t section_len = sectionsub.size();
-    for (const ToolboxIni::Entry& entry : entries) {
+    for (const auto& entry : entries) {
         if (strncmp(entry.pItem, sectionsub.c_str(), section_len) != 0) {
             continue;
         }
@@ -557,36 +639,8 @@ void Pcon::LoadSettings(const ToolboxIni* inifile, const char* section)
     }
 }
 
-void Pcon::SaveSettings(ToolboxIni* inifile, const char* section) const
-{
-    char buf_active[256];
-    char buf_threshold[256];
-    char buf_visible[256];
-    snprintf(buf_active, 256, "%s_active", ini.c_str());
-    snprintf(buf_threshold, 256, "%s_threshold", ini.c_str());
-    snprintf(buf_visible, 256, "%s_visible", ini.c_str());
-    inifile->SetLongValue(section, buf_threshold, threshold);
-    inifile->SetBoolValue(section, buf_visible, visible);
-
-    for (const auto& charname_pcons : settings_by_charname) {
-        const bool _enabled = *charname_pcons.second;
-        if (charname_pcons.first == L"default") {
-            inifile->SetBoolValue(section, buf_active, _enabled);
-            continue;
-        }
-        const auto& charname = charname_pcons.first;
-        if (charname.empty()) {
-            continue;
-        }
-        std::string char_section(section);
-        char_section.append(":");
-        char_section.append(TextUtils::WStringToString(charname).c_str());
-        inifile->SetBoolValue(char_section.c_str(), buf_active, _enabled);
-    }
-}
-
 // ================================================
-size_t PconGeneric::QuantityForEach(const GW::Item* item) const
+size_t PconGeneric::PointsPerUse(const GW::Item* item) const
 {
     if (item->model_id == static_cast<DWORD>(itemID)) {
         return 1;
@@ -599,7 +653,7 @@ void PconGeneric::OnButtonClick()
     using namespace GW::Constants;
     Pcon::OnButtonClick();
 
-    if (PconsWindow::Instance().shift_click_toggles_category && ImGui::IsKeyDown(ImGuiMod_Shift)) {
+    if (PconsWindow::Instance().settings.shift_click_toggles_category && ImGui::IsKeyDown(ImGuiMod_Shift)) {
         namespace r = std::ranges;
         const std::vector<std::vector<DWORD>> categories{
             {ItemID::ConsEssence, ItemID::ConsGrail, ItemID::ConsArmor},
@@ -724,7 +778,7 @@ bool PconCity::IsVisible() const
     return visible && (!hide_city_pcons_in_explorable_areas || maptype == GW::Constants::InstanceType::Outpost);
 }
 
-size_t PconCity::QuantityForEach(const GW::Item* item) const
+size_t PconCity::PointsPerUse(const GW::Item* item) const
 {
     using namespace GW::Constants;
     switch (item->model_id) {
@@ -748,43 +802,9 @@ bool PconAlcohol::CanUseByEffect() const
     return AlcoholWidget::Instance().GetAlcoholLevel() <= 1;
 }
 
-size_t PconAlcohol::QuantityForEach(const GW::Item* item) const
+size_t PconAlcohol::PointsPerUse(const GW::Item* item) const
 {
-    using namespace GW::Constants;
-    switch (item->model_id) {
-        case ItemID::Eggnog:
-        case ItemID::DwarvenAle:
-        case ItemID::HuntersAle:
-        case ItemID::Absinthe:
-        case ItemID::WitchsBrew:
-        case ItemID::Ricewine:
-        case ItemID::ShamrockAle:
-        case ItemID::Cider:
-            return 1;
-        case ItemID::Grog:
-        case ItemID::SpikedEggnog:
-        case ItemID::AgedDwarvenAle:
-        case ItemID::AgedHuntersAle:
-        case ItemID::FlaskOfFirewater:
-        case ItemID::KrytanBrandy:
-            return 5;
-        case ItemID::Keg: {
-            const GW::ItemModifier* mod = item->mod_struct;
-            if (mod == nullptr) {
-                return 5; // we don't think this will ever happen
-            }
-
-            for (DWORD i = 0; i < item->mod_struct_size; i++) {
-                if (mod->identifier() == 0x2458) {
-                    return mod->arg2() * 5;
-                }
-                mod++;
-            }
-            return 5; // this should never happen, but we keep it as a fallback
-        }
-        default:
-            return 0;
-    }
+    return GW::Items::GetAlcoholPointsPerUse(item);
 }
 
 void PconAlcohol::ForceUse()
@@ -809,7 +829,7 @@ void PconLunar::Update(const int)
     Pcon::Update(lunar_delay);
 }
 
-size_t PconLunar::QuantityForEach(const GW::Item* item) const
+size_t PconLunar::PointsPerUse(const GW::Item* item) const
 {
     using namespace GW::Constants;
     switch (item->model_id) {
@@ -862,7 +882,7 @@ bool PconScroll::CanUseByEffect() const
     return true;
 }
 
-size_t PconScroll::QuantityForEach(const GW::Item* item) const
+size_t PconScroll::PointsPerUse(const GW::Item* item) const
 {
     using namespace GW::Constants;
     if (!item)

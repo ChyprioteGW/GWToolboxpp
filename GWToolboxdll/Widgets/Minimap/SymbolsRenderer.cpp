@@ -37,24 +37,17 @@ namespace {
     }
 }
 
-void SymbolsRenderer::LoadSettings(const ToolboxIni* ini, const char* section)
+void SymbolsRenderer::RegisterSettings(ToolboxModule* module)
 {
-    color_quest = Colors::Load(ini, section, "color_quest", 0xFF22EF22);
-    color_quest_line = Colors::Load(ini, section, "color_quest_line", 0xFF22EF22);
-    color_other_quests = Colors::Load(ini, section, "color_other_quests", 0x00006400);
-    color_north = Colors::Load(ini, section, "color_north", 0xFFFF8000);
-    color_modifier = Colors::Load(ini, section, "color_symbols_modifier", 0x001E1E1E);
-
-    Invalidate();
-}
-
-void SymbolsRenderer::SaveSettings(ToolboxIni* ini, const char* section) const
-{
-    Colors::Save(ini, section, "color_quest", color_quest);
-    Colors::Save(ini, section, "color_quest_line", color_quest_line);
-    Colors::Save(ini, section, "color_other_quests", color_other_quests);
-    Colors::Save(ini, section, "color_north", color_north);
-    Colors::Save(ini, section, "color_symbols_modifier", color_modifier);
+    // SettingColor is layout-compatible with Color; the cast lets the registry persist it as a hex string
+    const auto register_color = [module](const char* key, Color* color) {
+        SettingsRegistry::RegisterField(module, key, reinterpret_cast<Colors::SettingColor*>(color));
+    };
+    register_color("color_quest", &color_quest);
+    register_color("color_quest_line", &color_quest_line);
+    register_color("color_other_quests", &color_other_quests);
+    register_color("color_north", &color_north);
+    register_color("color_symbols_modifier", &color_modifier);
 }
 
 void SymbolsRenderer::DrawSettings()
@@ -92,32 +85,12 @@ void SymbolsRenderer::DrawSettings()
 
 void SymbolsRenderer::Initialize(IDirect3DDevice9* device)
 {
-    if (initialized) {
-        return;
-    }
-    initialized = true;
+    clear();
     type = D3DPT_TRIANGLELIST;
-
-    D3DVertex* vertices = nullptr;
-    const DWORD vertex_count = (star_ntriangles + arrow_ntriangles + north_ntriangles) * 3;
-    DWORD offset = 0;
-
-    device->CreateVertexBuffer(sizeof(D3DVertex) * vertex_count, D3DUSAGE_WRITEONLY,
-                               D3DFVF_CUSTOMVERTEX, D3DPOOL_MANAGED, &buffer, nullptr);
-    buffer->Lock(0, sizeof(D3DVertex) * vertex_count,
-                 reinterpret_cast<void**>(&vertices), D3DLOCK_DISCARD);
-
-    const auto add_vertex = [&vertices, &offset](const float x, const float y, const Color color) -> void {
-        vertices[0].x = x;
-        vertices[0].y = y;
-        vertices[0].z = 0.0f;
-        vertices[0].color = color;
-        ++vertices;
-        ++offset;
-    };
+    vertices.reserve((star_ntriangles + arrow_ntriangles + north_ntriangles) * 3);
 
     // === Star ===
-    star_offset = offset;
+    star_offset = vertices.size();
     for (auto i = 0u; i < star_ntriangles; i++) {
         constexpr float star_size_big = 300.0f;
         constexpr float star_size_small = 150.0f;
@@ -127,41 +100,36 @@ void SymbolsRenderer::Initialize(IDirect3DDevice9* device)
         const float size2 = (i + 1) % 2 == 0 ? star_size_small : star_size_big;
         const Color c1 = (i + 0) % 2 == 0 ? color_quest : Colors::Sub(color_quest, color_modifier);
         const Color c2 = (i + 1) % 2 == 0 ? color_quest : Colors::Sub(color_quest, color_modifier);
-        add_vertex(std::cos(angle1) * size1, std::sin(angle1) * size1, c1);
-        add_vertex(std::cos(angle2) * size2, std::sin(angle2) * size2, c2);
-        add_vertex(0.0f, 0.0f, Colors::Add(color_quest, color_modifier));
+        vertices.push_back({std::cos(angle1) * size1, std::sin(angle1) * size1, 0.f, c1});
+        vertices.push_back({std::cos(angle2) * size2, std::sin(angle2) * size2, 0.f, c2});
+        vertices.push_back({0.f, 0.f, 0.f, Colors::Add(color_quest, color_modifier)});
     }
 
     // === Arrow (quest) ===
-    arrow_offset = offset;
-    add_vertex(0.0f, -125.0f, Colors::Add(color_quest, color_modifier));
-    add_vertex(250.0f, -250.0f, color_quest);
-    add_vertex(0.0f, 250.0f, color_quest);
-    add_vertex(0.0f, 250.0f, color_quest);
-    add_vertex(-250.0f, -250.0f, color_quest);
-    add_vertex(0.0f, -125.0f, Colors::Add(color_quest, color_modifier));
+    arrow_offset = vertices.size();
+    vertices.push_back({0.f, -125.f, 0.f, Colors::Add(color_quest, color_modifier)});
+    vertices.push_back({250.f, -250.f, 0.f, color_quest});
+    vertices.push_back({0.f, 250.f, 0.f, color_quest});
+    vertices.push_back({0.f, 250.f, 0.f, color_quest});
+    vertices.push_back({-250.f, -250.f, 0.f, color_quest});
+    vertices.push_back({0.f, -125.f, 0.f, Colors::Add(color_quest, color_modifier)});
 
     // === Arrow (north) ===
-    north_offset = offset;
-    add_vertex(0.0f, -375.0f, Colors::Add(color_north, color_modifier));
-    add_vertex(250.0f, -500.0f, color_north);
-    add_vertex(0.0f, 0.0f, color_north);
-    add_vertex(0.0f, 0.0f, color_north);
-    add_vertex(-250.0f, -500.0f, color_north);
-    add_vertex(0.0f, -375.0f, Colors::Add(color_north, color_modifier));
+    north_offset = vertices.size();
+    vertices.push_back({0.f, -375.f, 0.f, Colors::Add(color_north, color_modifier)});
+    vertices.push_back({250.f, -500.f, 0.f, color_north});
+    vertices.push_back({0.f, 0.f, 0.f, color_north});
+    vertices.push_back({0.f, 0.f, 0.f, color_north});
+    vertices.push_back({-250.f, -500.f, 0.f, color_north});
+    vertices.push_back({0.f, -375.f, 0.f, Colors::Add(color_north, color_modifier)});
 
-    buffer->Unlock();
-}
-
-void SymbolsRenderer::Invalidate()
-{
-    VBuffer::Invalidate();
-    this->initialized = false;
+    D3DVertexBuffer::Initialize(device);
 }
 
 void SymbolsRenderer::Render(IDirect3DDevice9* device, float zoom)
 {
-    Initialize(device);
+    if(!initialized)
+        Initialize(device);
 
     if (!ConfigureProgrammablePipeline(device)) {
         return;

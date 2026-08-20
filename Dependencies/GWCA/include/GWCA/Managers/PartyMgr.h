@@ -8,6 +8,7 @@ namespace GW {
     struct PartySearch;
     struct PetInfo;
     struct HeroInfo;
+    struct HeroConstData;
 
     struct Attribute;
     enum class HeroBehavior : uint32_t;
@@ -16,11 +17,13 @@ namespace GW {
 
     struct Module;
     extern Module PartyModule;
+    namespace Constants {
+        enum HeroID : uint32_t;
+    }
 
     namespace PartyMgr {
 
-        // set or unset the fact that ticking will work as a toggle instead
-        // of showing a drop-down menu
+        // Set or unset whether ticking works as a toggle instead of showing a drop-down menu.
 
         GWCA_API void SetTickToggle(bool enable);
 
@@ -67,8 +70,8 @@ namespace GW {
         GWCA_API bool LeaveParty();
 
         // hero managment
-        GWCA_API bool AddHero(uint32_t heroid);
-        GWCA_API bool KickHero(uint32_t heroid);
+        GWCA_API bool AddHero(GW::Constants::HeroID heroid);
+        GWCA_API bool KickHero(GW::Constants::HeroID heroid);
         GWCA_API bool KickAllHeroes();
         GWCA_API bool AddHenchman(uint32_t agent_id);
         GWCA_API bool KickHenchman(uint32_t agent_id);
@@ -85,12 +88,15 @@ namespace GW {
         GWCA_API bool SetHeroTarget(uint32_t hero_agent_id, uint32_t target_agent_id = 0);
         GWCA_API bool SetHeroBehavior(uint32_t hero_agent_id, HeroBehavior behavior);
         GWCA_API bool SetPetBehavior(uint32_t owner_agent_id, HeroBehavior behavior);
+        GWCA_API bool SetHeroSkillDisabled(uint32_t hero_agent_id, uint32_t slot_index, bool disabled = true);
 
         GWCA_API PetInfo* GetPetInfo(uint32_t owner_agent_id = 0);
 
         GWCA_API uint32_t GetHeroAgentID(uint32_t hero_index);
 
-        GWCA_API HeroInfo* GetHeroInfo(uint32_t hero_id);
+        GWCA_API HeroInfo* GetHeroInfo(GW::Constants::HeroID hero_id);
+
+        GWCA_API HeroConstData* GetHeroConstData(GW::Constants::HeroID hero_id);
 
         // Advertise your party in party search window
         GWCA_API bool SearchParty(uint32_t search_type, const wchar_t* advertisement = nullptr);

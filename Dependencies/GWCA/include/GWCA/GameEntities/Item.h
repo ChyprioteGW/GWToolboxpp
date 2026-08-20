@@ -22,6 +22,7 @@ namespace GW {
     }
 
     struct Item;
+    struct Inventory;
     typedef Array<Item *> ItemArray;
 
     enum class DyeColor : uint8_t {
@@ -49,11 +50,12 @@ namespace GW {
     static_assert(sizeof(DyeInfo) == 3, "struct DyeInfo has incorrect size");
 
     struct ItemData {
-        uint32_t model_file_id = 0;
-        GW::Constants::ItemType type = (GW::Constants::ItemType)0xff;
-        GW::DyeInfo dye = {};
-        uint32_t value = 0;
-        uint32_t interaction = 0;
+        // No default member initializers: GCC rejects non-trivial members in the anonymous struct/union in Agent.h that uses this.
+        uint32_t model_file_id;
+        GW::Constants::ItemType type;
+        GW::DyeInfo dye;
+        uint32_t value;
+        uint32_t interaction;
     };
     static_assert(sizeof(ItemData) == 0x10, "struct ItemData has incorrect size");
 
@@ -80,7 +82,7 @@ namespace GW {
         /* +h0008 */ uint32_t _unknown0;
         /* +h000C */ uint32_t container_item;
         /* +h0010 */ uint32_t items_count;
-        /* +h0014 */ Bag      *bag_array;
+        /* +h0014 */ Inventory *inventory;
         /* +h0018 */ ItemArray items;
 
         bool IsInventoryBag()       const { return bag_type == Constants::BagType::Inventory; }
@@ -207,8 +209,16 @@ namespace GW {
         /* +h0088 */ uint32_t h0088[2];
         /* +h0090 */ uint32_t gold_character;
         /* +h0094 */ uint32_t gold_storage;
+        /* +0x098 */ uint32_t cached_hash;  // at m_slotSize offset
+        /* +0x09C */ uint32_t next_offset;  // = 0x9c
+        /* +0x0A0 */ Inventory* next;       // chain pointer
+
+        [[nodiscard]] uint32_t inventory_id() const
+        {
+            return (uint32_t)unused_bag; // Fucked ourselves with this one; bag ids depend on the array starting at the inventory id...
+        }
     };
-    static_assert(sizeof(Inventory) == 152, "struct Inventory has incorrect size");
+    static_assert(sizeof(Inventory) == 0xa4, "struct Inventory has incorrect size");
 
     // Static struct for info about available item upgrade info, used for PvP Equipment window
     struct PvPItemUpgradeInfo {

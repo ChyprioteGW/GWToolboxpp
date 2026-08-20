@@ -11,19 +11,19 @@
 #include <GWCA/Utilities/Scanner.h>
 #include <GWCA/Utilities/Hooker.h>
 
+#include <Defines.h>
 #include <Utils/GuiUtils.h>
 #include <Modules/DialogModule.h>
 #include <Logger.h>
 #include <Timer.h>
 #include <Utils/TextUtils.h>
-#include <Utils/ToolboxUtils.h>
 
 namespace {
     GW::UI::UIInteractionCallback NPCDialogUICallback_Func = nullptr;
     GW::UI::UIInteractionCallback NPCDialogUICallback_Ret = nullptr;
 
     std::vector<GW::UI::DialogButtonInfo*> dialog_buttons;
-    std::vector<GuiUtils::EncString*> dialog_button_messages;
+    std::vector<std::unique_ptr<GuiUtils::EncString>> dialog_button_messages;
 
     GW::UI::DialogBodyInfo dialog_info;
     uint32_t last_agent_id = 0;
@@ -40,10 +40,10 @@ namespace {
         const auto button_info = new GW::UI::DialogButtonInfo();
         memcpy(button_info, wparam, sizeof(*button_info));
 
-        const auto button_message = new GuiUtils::EncString(button_info->message);
+        auto button_message = std::make_unique<GuiUtils::EncString>(button_info->message);
         button_info->message = const_cast<wchar_t*>(button_message->encoded().data());
 
-        dialog_button_messages.push_back(button_message);
+        dialog_button_messages.push_back(std::move(button_message));
         dialog_buttons.push_back(button_info);
     }
 
@@ -71,19 +71,19 @@ namespace {
         }
     }
 
-    // Wipe dialog ready for new one
     void ResetDialog()
     {
         for (const auto d : dialog_buttons) {
             delete d;
         }
         dialog_buttons.clear();
-        for (const auto d : dialog_button_messages) {
-            delete d;
-        }
         dialog_button_messages.clear();
 
         dialog_body.reset(nullptr);
+        // Remember who we were talking to; needed to re-open the dialog if the server closes it mid-conversation
+        if (dialog_info.agent_id) {
+            last_agent_id = dialog_info.agent_id;
+        }
         dialog_info = {};
     }
 
@@ -92,10 +92,6 @@ namespace {
         GW::Hook::EnterHook();
         if (message->message_id == GW::UI::UIMessage::kDestroyFrame) {
             ResetDialog();
-            if (dialog_info.agent_id) {
-                last_agent_id = dialog_info.agent_id;
-            }
-            dialog_info.agent_id = 0;
         }
         NPCDialogUICallback_Ret(message, wparam, lparam);
         GW::Hook::LeaveHook();
@@ -106,7 +102,9 @@ namespace {
         if (queued_dialogs_to_send.empty()) {
             return;
         }
-        const auto npc = GW::Agents::GetAgentByID(last_agent_id);
+        // dialog_info may not have been reset yet, depending on which of the close messages arrived first
+        const auto agent_id = dialog_info.agent_id ? dialog_info.agent_id : last_agent_id;
+        const auto npc = GW::Agents::GetAgentByID(agent_id);
         const auto me =  npc ? GW::Agents::GetControlledCharacter() : nullptr;
         if (me && GetDistance(npc->pos, me->pos) < GW::Constants::Range::Area) {
             GW::Agents::InteractAgent(npc);
@@ -226,10 +224,6 @@ void DialogModule::OnDialogSent(const uint32_t dialog_id)
             return GetQuestID(pair.first) == quest_id && queued_at == pair.second;
         });
     }
-    if (IsUWTele(dialog_id)) {
-        queued_dialogs_to_send.erase(GW::Constants::DialogID::UwTeleEnquire);
-        queued_dialogs_to_send.erase(dialog_id - 0x7);
-    }
 }
 
 void DialogModule::Initialize()
@@ -245,10 +239,15 @@ void DialogModule::Initialize()
         RegisterUIMessageCallback(&dialog_hook, message_id, OnPostUIMessage, 0x500);
     }
 
-    NPCDialogUICallback_Func = (GW::UI::UIInteractionCallback)GW::Scanner::ToFunctionStart(GW::Scanner::FindAssertion("GmNpc.cpp", "msg.createParam", 0x3fe, 0));
+    // NB: Don't pin the assertion line number; it shifts whenever ArenaNet edits GmNpc.cpp (0x3fe -> 0x40c)
+    NPCDialogUICallback_Func = (GW::UI::UIInteractionCallback)GW::Scanner::ToFunctionStart(GW::Scanner::FindAssertion("GmNpc.cpp", "msg.createParam", 0, 0));
+    DEBUG_ASSERT(NPCDialogUICallback_Func);
     if (NPCDialogUICallback_Func) {
         GW::Hook::CreateHook((void**)&NPCDialogUICallback_Func, OnNPCDialogUICallback, reinterpret_cast<void**>(&NPCDialogUICallback_Ret));
         GW::Hook::EnableHooks(NPCDialogUICallback_Func);
+    }
+    else {
+        Log::Error("Failed to find NPC dialog UI callback; dialog state won't be reset when a conversation ends");
     }
 }
 
@@ -338,7 +337,7 @@ const wchar_t* DialogModule::GetDialogBody()
     return dialog_body.encoded().c_str();
 }
 
-const std::vector<GuiUtils::EncString*>& DialogModule::GetDialogButtonMessages()
+const std::vector<std::unique_ptr<GuiUtils::EncString>>& DialogModule::GetDialogButtonMessages()
 {
     return dialog_button_messages;
 }
@@ -353,12 +352,19 @@ uint32_t DialogModule::AcceptFirstAvailableQuest()
         return 0;
     }
     std::vector<uint32_t> available_quests;
+    uint32_t tick_dialog_id = 0;
     for (const auto dialog_button : dialog_buttons) {
         const uint32_t dialog_id = dialog_button->dialog_id;
+        switch (dialog_button->button_icon) {
+            case 0xb:
+            case 0xd:
+            case 0x18:
+                tick_dialog_id = dialog_id;
+                break;
+        }
         if (!IsQuest(dialog_id)) {
             continue;
         }
-        // Quest related dialog
         uint32_t quest_id = GetQuestID(dialog_id);
         switch (GetQuestDialogType(dialog_id)) {
             case QuestDialogType::TAKE:
@@ -390,6 +396,10 @@ uint32_t DialogModule::AcceptFirstAvailableQuest()
     }
     if (!available_quests.empty()) {
         return take_quest(available_quests[0]);
+    }
+    if (tick_dialog_id) {
+        SendDialog(tick_dialog_id);
+        return tick_dialog_id;
     }
     return 0;
 }

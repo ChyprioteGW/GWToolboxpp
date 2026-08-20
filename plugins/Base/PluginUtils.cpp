@@ -178,24 +178,6 @@ namespace PluginUtils {
         return rect;
     }
 
-    float GetPartyHealthbarHeight()
-    {
-        const auto interfacesize =
-            static_cast<GW::Constants::InterfaceSize>(GetPreference(GW::UI::EnumPreference::InterfaceSize));
-        switch (interfacesize) {
-            case GW::Constants::InterfaceSize::SMALL:
-                return GW::Constants::HealthbarHeight::Small;
-            case GW::Constants::InterfaceSize::NORMAL:
-                return GW::Constants::HealthbarHeight::Normal;
-            case GW::Constants::InterfaceSize::LARGE:
-                return GW::Constants::HealthbarHeight::Large;
-            case GW::Constants::InterfaceSize::LARGER:
-                return GW::Constants::HealthbarHeight::Larger;
-            default:
-                return GW::Constants::HealthbarHeight::Normal;
-        }
-    }
-
     std::string ToSlug(std::string s)
     {
         s = RemovePunctuation(s);
@@ -315,7 +297,6 @@ namespace PluginUtils {
         return out;
     }
 
-    // Convert a wide Unicode string to an UTF8 string
     std::string WStringToString(const std::wstring& s)
     {
         // @Cleanup: ASSERT used incorrectly here; value passed could be from anywhere!
@@ -369,7 +350,6 @@ namespace PluginUtils {
     std::wstring RemoveDiacritics(const std::wstring& s)
     {
         if (diacritics_charmap.empty()) {
-            // Build static diacritics map if not already done so
             for (size_t i = 0; i < _countof(diacritics); i++) {
                 for (size_t j = 1; diacritics[i][j]; j++) {
                     diacritics_charmap[diacritics[i][j]] = diacritics[i][0];
@@ -387,7 +367,6 @@ namespace PluginUtils {
         return out;
     }
 
-    // Convert an UTF8 string to a wide Unicode String
     std::wstring StringToWString(const std::string& str)
     {
         // @Cleanup: ASSERT used incorrectly here; value passed could be from anywhere!

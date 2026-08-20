@@ -1,14 +1,8 @@
 #include "stdafx.h"
 
-#include <GWCA/Utilities/Debug.h>
 #include <GWCA/Utilities/Hooker.h>
 #include <GWCA/Utilities/Scanner.h>
 
-#include <GWCA/Managers/GameThreadMgr.h>
-#include <GWCA/Managers/MemoryMgr.h>
-
-#include <Defines.h>
-#include <ImGuiAddons.h>
 #include "VendorFix.h"
 
 #include <GWCA/Managers/UIMgr.h>
@@ -16,19 +10,14 @@
 #include <GWCA/GameEntities/Item.h>
 
 #include <GWCA/Managers/ItemMgr.h>
-#include "Timer.h"
 
 namespace {
 
     void RefreshVendorItems(GW::UI::Frame* frame) {
         if (!frame) return;
         /*
-        If the vendor frame has just been created, look at our inventory.
-        Any valid item ID after thr 56th item won't be found immediately by a collector.
-
-        Fortunately, triggering ui message GW::UI::UIMessage::kInventorySlotUpdated on the slot seems to work.
-
-        Identify the "problem" slots, and let the vendor know by spoofing the packet.
+        A freshly created vendor frame doesn't pick up inventory items past the 56th slot;
+        spoofing kInventorySlotUpdated for those slots makes the collector see them.
         */
 
         const auto inventory = GW::Items::GetInventory();

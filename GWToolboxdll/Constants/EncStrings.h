@@ -79,6 +79,8 @@ namespace GW {
             static const wchar_t* DepthsOfTyria = L"\x8101\x76FD";
         }
 
+        static const wchar_t* LockedChest = L"\x8101\x6303\xf5ca\x9a4c\x71ff";
+
         static const wchar_t* Bone = L"\x22D0\xBEB5\xC462\x64B5";
         static const wchar_t* IronIngot = L"\x22EB\xC6B0\xBD46\x2DAD";
         static const wchar_t* TannedHideSquare = L"\x22E3\xD3A9\xC22C\x285A";
@@ -122,6 +124,7 @@ namespace GW {
         static const wchar_t* QuetzalCrests = L"\x8102\x26DC\xADF9\x8D4B\x6575";
         static const wchar_t* PlagueIdols = L"\x56D3\xA490\xE607\x11B6";
         static const wchar_t* AzureRemains = L"\x294D";
+        static const wchar_t* MandragorRoot = L"\x8101\x5842\xB18D\xE040\x1169";
         static const wchar_t* MandragorRootCake = L"\x8101\x52E9\xA18F\x8FE1\x3EE9";
         static const wchar_t* MahgoClaw = L"\x2960";
         static const wchar_t* MantidPincers = L"\x56EF\xD1D8\xC773\x2C26";
@@ -163,6 +166,8 @@ namespace GW {
         static const wchar_t* CelestialEssences = L"\x570A\x9453\x84A6\x64D4";
         static const wchar_t* PhantomResidue = L"\x2937";
         static const wchar_t* DrakeKabob = L"\x8101\x42D1\xFB15\xD39E\x5A26";
+        static const wchar_t* ChunkOfDrakeFlesh = L"\x8101\x583B\xDE0B\xE373\x1070";
+        static const wchar_t* IbogaPetals = L"\x8101\x4C7C\xE7C2\xCDDF\x4BF3";
         static const wchar_t* AmberChunks = L"\x55D0\xF8B7\xB108\x6018";
         static const wchar_t* GlowingHearts = L"\x2914";
         static const wchar_t* SaurianBones = L"\x8102\x26D8\xB5B9\x9AF6\x42D6";
@@ -185,6 +190,7 @@ namespace GW {
         static const wchar_t* DragonRoot = L"\x56E5\x922D\xCF17\x7258";
         static const wchar_t* BerserkerHorns = L"\x8102\x26E3\xB76F\xE56C\x1A2";
         static const wchar_t* BehemothJaw = L"\x292E";
+        static const wchar_t* SkaleFins = L"\x8101\x4C7D\xAD41\xFB45\x79A8";
         static const wchar_t* BowlofSkalefinSoup = L"\x8101\x42D2\xE08B\xB81A\x604";
         static const wchar_t* ForestMinotaurHorns = L"\x2915";
         static const wchar_t* PutridCysts = L"\x56ED\xE607\x9B27\x7299";
@@ -258,7 +264,7 @@ namespace GW {
         static const wchar_t* SkeletalLimbs = L"\x2907";
         static const wchar_t* UnnaturalSeeds = L"\x2903";
         static const wchar_t* EnchantedLodestones = L"\x2908";
-        static const wchar_t* SkaleFins = L"\x2906";
+        static const wchar_t* SkaleFinPreSearing = L"\x2906";
         static const wchar_t* GargoyleSkulls = L"\x28F8";
         static const wchar_t* DullCarapaces = L"\x28F0";
         static const wchar_t* WornBelts = L"\x28FE";
@@ -311,6 +317,12 @@ namespace GW {
             static const wchar_t* TheLastHeirophant = L"\x8102\x10b5\xbc2f\xb47f\x30a7";
         }
 
+        namespace HeroBehavior {
+            static const wchar_t* Fight = L"\x8101\x5E27";
+            static const wchar_t* Guard = L"\x8101\x5E28";
+            static const wchar_t* Avoid = L"\x8101\x5E29";
+        }
+
         // General settings
         static const uint32_t TextLanguage = 0x561;
         static const uint32_t AudioLanguage = 0xdbe2;
@@ -320,6 +332,9 @@ namespace GW {
         static const uint32_t InvertMouseControlOfCamera = 0x572;
         static const uint32_t ShowAllyNpcAndItemNames = 0x5c4;
         static const uint32_t ShowFoeNames = 0x5c6;
+        static const uint32_t LegacyStartMissionButton = 0x1396b;
+        static const uint32_t EnableMobileHUD = 0x13b4d;
+
         // ...
 
         // Graphics settings

@@ -7,6 +7,8 @@
 #include <GWCA/GameEntities/Agent.h>
 #include <GWCA/Context/MapContext.h>
 
+#include <Utils/TerrainDrape.h>
+
 namespace MathUtil {
     GW::Vec2f GetVec2f(const GW::Vec3f &r) {
         return { r.x, r.y };
@@ -21,7 +23,7 @@ namespace MathUtil {
         }
 
         GW::Vec3f pos{ gp.x, gp.y, 0.0f };
-        pos.z = GW::Map::QueryAltitude((GW::GamePos*) & pos);
+        pos.z = TerrainDrape::QueryAltAt(pos.x, pos.y, gp.zplane); // sample on the point's own plane (guarded valid above)
         return pos;
     }
 
@@ -47,7 +49,7 @@ namespace MathUtil {
 
     // Given three collinear points p, q, r, the function checks if
     // point q lies on line segment 'pr'
-    inline bool onSegment(const GW::Vec2f& p, const GW::Vec2f& q, const GW::Vec2f& r)
+    bool onSegment(const GW::Vec2f& p, const GW::Vec2f& q, const GW::Vec2f& r)
     {
         if (q.x <= (std::max)(p.x, r.x) && q.x >= (std::min)(p.x, r.x) &&
             q.y <= (std::max)(p.y, r.y) && q.y >= (std::min)(p.y, r.y))
@@ -56,8 +58,6 @@ namespace MathUtil {
         return false;
     }
 
-    // The main function that returns true if line segment 'p1q1'
-    // and 'p2q2' intersect.
     bool Intersect(const GW::Vec2f& p1, const GW::Vec2f& q1, const GW::Vec2f& p2, const GW::Vec2f& q2) {
         constexpr float eps = 0.001f;
         float denom = (q2.y - p2.y) * (q1.x - p1.x) - (q2.x - p2.x) * (q1.y - p1.y);

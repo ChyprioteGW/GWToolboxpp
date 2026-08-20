@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include <Utils/GuiUtils.h>
+#include <Utils/TextUtils_Time.h>
 
 #include <Widgets/ClockWidget.h>
 #include <Modules/ToolboxSettings.h>
@@ -9,7 +10,7 @@
 #include "Utils/FontLoader.h"
 
 namespace {
-    float font_size = 48.0f;
+    ClockWidget::Settings settings;
 }
 
 void ClockWidget::Draw(IDirect3DDevice9*)
@@ -18,34 +19,33 @@ void ClockWidget::Draw(IDirect3DDevice9*)
         return;
     }
 
-    SYSTEMTIME time;
-    GetLocalTime(&time);
+    const auto time = TextUtils::Time::GetCurrentSystemTime();
 
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
     ImGui::SetNextWindowSize(ImVec2(250.0f, 90.0f), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(Name(), nullptr, GetWinFlags())) {
         static char timer[32];
-        if (use_24h_clock) {
-            if (show_seconds) {
-                snprintf(timer, 32, "%02d:%02d:%02d", time.wHour, time.wMinute, time.wSecond);
+        if (settings.use_24h_clock) {
+            if (settings.show_seconds) {
+                snprintf(timer, 32, "%02d:%02d:%02d", time.hour, time.minute, time.second);
             }
             else {
-                snprintf(timer, 32, "%02d:%02d", time.wHour, time.wMinute);
+                snprintf(timer, 32, "%02d:%02d", time.hour, time.minute);
             }
         }
         else {
-            int hour = time.wHour % 12;
+            int hour = time.hour % 12;
             if (hour == 0) {
                 hour = 12;
             }
-            if (show_seconds) {
-                snprintf(timer, 32, "%d:%02d:%02d %s", hour, time.wMinute, time.wSecond, time.wHour >= 12 ? "p.m." : "a.m.");
+            if (settings.show_seconds) {
+                snprintf(timer, 32, "%d:%02d:%02d %s", hour, time.minute, time.second, time.hour >= 12 ? "p.m." : "a.m.");
             }
             else {
-                snprintf(timer, 32, "%d:%02d %s", hour, time.wMinute, time.wHour >= 12 ? "p.m." : "a.m.");
+                snprintf(timer, 32, "%d:%02d %s", hour, time.minute, time.hour >= 12 ? "p.m." : "a.m.");
             }
         }
-        ImGui::PushFont(FontLoader::GetFontByPx(font_size), font_size);
+        ImGui::PushFont(FontLoader::GetFont(), settings.font_size);
         const ImVec2 cur = ImGui::GetCursorPos();
         ImGui::SetCursorPos(ImVec2(cur.x + 2, cur.y + 2));
         ImGui::TextColored(ImColor(0, 0, 0), timer);
@@ -57,26 +57,28 @@ void ClockWidget::Draw(IDirect3DDevice9*)
     ImGui::PopStyleColor();
 }
 
-void ClockWidget::LoadSettings(ToolboxIni* ini)
+void ClockWidget::Initialize()
 {
-    ToolboxWidget::LoadSettings(ini);
-    LOAD_BOOL(use_24h_clock);
-    LOAD_BOOL(show_seconds);
-    LOAD_FLOAT(font_size);
+    ToolboxWidget::Initialize();
+    SettingsRegistry::Register(this, settings);
 }
 
-void ClockWidget::SaveSettings(ToolboxIni* ini)
+void ClockWidget::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
-    ToolboxWidget::SaveSettings(ini);
-    SAVE_BOOL(use_24h_clock);
-    SAVE_BOOL(show_seconds);
-    SAVE_FLOAT(font_size);
+    ToolboxWidget::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
+}
+
+void ClockWidget::SaveSettings(SettingsDoc& doc)
+{
+    ToolboxWidget::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 }
 
 void ClockWidget::DrawSettingsInternal()
 {
-    ImGui::Checkbox("Use 24h clock", &use_24h_clock);
-    ImGui::Checkbox("Show seconds", &show_seconds);
-    ImGui::DragFloat("Text size in px", &font_size, 1.f, 0.f, 48.f, "%.f");
+    ImGui::Checkbox("Use 24h clock", &settings.use_24h_clock);
+    ImGui::Checkbox("Show seconds", &settings.show_seconds);
+    ImGui::DragFloat("Text size in px", &settings.font_size, 1.f, 0.f, 48.f, "%.f");
 
 }

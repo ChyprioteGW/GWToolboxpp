@@ -16,10 +16,10 @@ void FactionLeaderboardWindow::Draw(IDirect3DDevice9*)
         return ImGui::End();
     }
     float offset = 0.0f;
-    const float tiny_text_width = 50.0f * ImGui::GetIO().FontGlobalScale;
-    const float short_text_width = 80.0f * ImGui::GetIO().FontGlobalScale;
+    const float tiny_text_width = 50.0f * ImGui::FontScale();
+    const float short_text_width = 80.0f * ImGui::FontScale();
     const float avail_width = ImGui::GetContentRegionAvail().x;
-    const float long_text_width = 200.0f * ImGui::GetIO().FontGlobalScale;
+    const float long_text_width = 200.0f * ImGui::FontScale();
     ImGui::Text("Rank");
     ImGui::SameLine(offset += tiny_text_width);
     ImGui::Text("Allegiance");
@@ -45,8 +45,9 @@ void FactionLeaderboardWindow::Draw(IDirect3DDevice9*)
             ImGui::SameLine(offset += short_text_width);
             ImGui::Text(Resources::GetMapName(e.map_id)->string().c_str());
             ImGui::SameLine(offset += long_text_width);
-            ImGui::Text("%s [%s]", TextUtils::WStringToString(e.name).c_str(), TextUtils::WStringToString(e.tag).c_str());
-            ImGui::PushID(&e);
+            const auto name_s = TextUtils::WStringToString(e.name);
+            ImGui::Text("%s [%s]", name_s.c_str(), TextUtils::WStringToString(e.tag).c_str());
+            ImGui::PushID(name_s.c_str());
             ImGui::SameLine(offset = avail_width - tiny_text_width);
             if (ImGui::Button("Wiki", ImVec2(tiny_text_width, 0))) {
                 GuiUtils::OpenWiki(std::format(L"Guild:{}", e.name));

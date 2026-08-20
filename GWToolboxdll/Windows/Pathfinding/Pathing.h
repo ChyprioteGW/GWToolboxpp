@@ -1,9 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
+#include <unordered_set>
+#include <GWCA/Constants/Maps.h>
 #include <GWCA/GameContainers/GamePos.h>
 #include <GWCA/GameEntities/Pathing.h>
 #include "MapSpecificData.h"
+#include "PathingMapData.h"
 
 namespace Pathing {
     #define PATHING_MAX_PLANE_COUNT 192 // Be sure to ASSERT if this is ever higher!
@@ -18,21 +22,71 @@ namespace Pathing {
         FailedToFinializePath,
         InvalidMapContext,
         BuildPathLengthExceeded,
-        FailedToGetPathingMapBlock
+        FailedToGetPathingMapBlock,
+        MilePathBuildOOM // worker thread aborted with std::bad_alloc; visgraph is unsafe to use
     };
 
 	typedef uint16_t PointId;
 
+    class NavMesh; // hand-built Detour mesh exposed for the debug overlay
+
+    // Snap `point` (x/y and zplane) to the closest position on the current map's live
+    // pathing trapezoids. Game thread only. Returns the trapezoid, or nullptr if no map.
+    GW::PathingTrapezoid* FindClosestPositionOnTrapezoid(GW::GamePos& point);
+
+    // True if `point` is inside a walkable trapezoid on the current map. Cheap (a BSP descent),
+    // unlike the snap above, which falls back to scanning every trapezoid when the point is
+    // outside the walkable area. Game thread only.
+    bool IsPositionWalkable(const GW::GamePos& point);
+
+    // BFS from the player's trapezoid through adjacency and unblocked portals. Blocking matches
+    // the game's native A* (IPath_ExpandPortalLeft/Right): portal.flags & 0x04, and
+    // blockedPlanes[neighbor_plane] & 1. Empty when the player's position is unknown, which
+    // callers should read as "assume everything is reachable" rather than "nothing is".
+    // Game thread only.
+    std::unordered_set<const GW::PathingTrapezoid*> FindReachableTrapezoids();
+
+    // True if `point` is walkable AND the player can actually get there. Terrain behind a closed
+    // gate or across a gap is walkable but not reachable, and the difference matters to anything
+    // that suggests somewhere to go. Result is cached until the map or the gate state changes.
+    // Game thread only.
+    bool IsPositionReachable(const GW::GamePos& point);
+
+    // True if walking straight from `a` to `b` would pass through a travel portal's doorway.
+    // Stepping into one changes map, so the far side is not somewhere this map's pathing can
+    // actually deliver you. Game thread only.
+    bool CrossesTravelPortal(const GW::Vec2f& a, const GW::Vec2f& b);
+
+    // Current blocked-plane state. Comparing the contents beats watching for a change event: it
+    // is exact, and it survives callers that were not listening at the moment a gate moved.
+    // False if there is no pathing context. Game thread only.
+    bool CopyBlockedPlanes(std::vector<uint32_t>& out);
+
     class MilePath {
         volatile bool m_processing = false;
         volatile bool m_done = false;
+        volatile bool m_build_failed = false; // worker thread caught std::bad_alloc during visgraph build
         volatile int m_progress = 0;
+
+        // Lazy full-build state. A lightweight MilePath (full_build=false) keeps only
+        // raw map data; EnsureFullBuild() builds the visgraph on first walk.
+        // m_constructed_full marks maps built eagerly on the worker (live current map).
+        volatile bool m_full_built = false;
+        bool m_constructed_full = false;
+        std::mutex m_build_mutex;
+        // MapIDs sharing this file_hash — for teleport collection in a (possibly
+        // deferred) full build. Kept here (not in opaque Impl) to keep Impl small.
+        std::vector<GW::Constants::MapID> m_all_map_ids;
 
         std::thread* worker_thread = nullptr;
 
-    public:	
-        MilePath(GW::MapContext*);
+    public:
+        MilePath(Pathing::PathingMapData&& map_data, GW::Constants::MapID map_id, const std::vector<GW::Constants::MapID>& all_map_ids = {}, bool full_build = true);
         ~MilePath();
+
+        // Build the full pathing graph (incl. visgraph) if not already present.
+        // Idempotent, thread-safe; called by AStar::Search to upgrade lazily.
+        void EnsureFullBuild();
 
         // Signals terminate to worker thread. Usually followed late by shutdown() to grab the thread again.
         void stopProcessing();
@@ -44,8 +98,8 @@ namespace Pathing {
             while (isProcessing())
                 Sleep(10);
             if (worker_thread) {
-                ASSERT(worker_thread->joinable());
-                worker_thread->join();
+                if (worker_thread->joinable())
+                    worker_thread->join();
                 delete worker_thread;
                 worker_thread = nullptr;
             }
@@ -56,16 +110,31 @@ namespace Pathing {
             return m_progress;
         }
 
+        // Read-only access to the underlying pathing map data (owned by MilePath).
+        // Lets callers reuse the loaded DAT data without re-reading it. Pointer
+        // remains valid for the MilePath's lifetime.
+        const Pathing::PathingMapData* GetMapData() const;
+
+        NavMesh* GetNavMeshForDebug();
+
         bool ready()
         {
             return m_progress >= 100;
         }
 
-        void* GetImpl() { return opaque; };
-    private:
-        void LoadMapSpecificData();
+        // True if the worker thread aborted with std::bad_alloc. The MilePath is unusable —
+        // search will return early. The caller is expected to surface an error / not retry.
+        bool build_failed() const { return m_build_failed; }
 
-        int opaque[336 / sizeof(int)];
+        void* GetImpl() { return opaque; };
+
+        // Export vis graph data: per-point position + edge count + edge targets
+        // Returns JSON string
+        std::string ExportVisGraph() const;
+
+    private:
+        // Pad sized for the largest (Debug) Impl; guarded by static_assert(sizeof(opaque) >= sizeof(Impl)).
+        int opaque[1024 / sizeof(int)];
     };
 
     class AStar {

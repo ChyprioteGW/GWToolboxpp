@@ -11,7 +11,7 @@ namespace GW {
         enum class SkillType;
     }
 
-    struct Skill { // total : 0xA0/160
+    struct Skill { // total : 0xA4/164
         /* +h0000 */ GW::Constants::SkillID skill_id;
         /* +h0004 */ uint32_t h0004;
         /* +h0008 */ GW::Constants::Campaign campaign;
@@ -75,6 +75,9 @@ namespace GW {
         [[nodiscard]] bool IsPvP() const { return (special & 0x400000) != 0; }
         [[nodiscard]] bool IsPvE() const { return (special & 0x80000) != 0; }
         [[nodiscard]] bool IsPlayable() const { return (special & 0x2000000) == 0; }
+        [[nodiscard]] bool ExploitsCorpse() const { return (special & 0x40000) != 0; }
+        [[nodiscard]] bool CausesHealthDegen() const { return (special & 0x200) != 0; }
+        [[nodiscard]] bool IsResurrectionSkill() const { return (special & 0x800) == 0; }
 
         // NB: Guild Wars uses the skill array to build mods for weapons, so stuff like runes are skills too, and use stacking/non-stacking flags
         [[nodiscard]] bool IsStacking() const { return (special & 0x10000) != 0; }

@@ -90,7 +90,7 @@ uint32_t SnapsToPartyWindow::pets_start_idx = 0xff;
 uint32_t SnapsToPartyWindow::allies_start_idx = 0xff;
 std::unordered_map<uint32_t, uint32_t> SnapsToPartyWindow::party_indeces_by_agent_id;
 std::vector<uint32_t> SnapsToPartyWindow::party_agent_ids_by_index;
-std::vector<GuiUtils::EncString*> SnapsToPartyWindow::party_names_by_index;
+std::vector<std::unique_ptr<GuiUtils::EncString>> SnapsToPartyWindow::party_names_by_index;
 
 SnapsToPartyWindow::PartyFramePosition* SnapsToPartyWindow::GetAgentHealthBarPosition(uint32_t agent_id) {
     if (!(agent_id && agent_health_bar_positions.contains(agent_id)))
@@ -106,7 +106,7 @@ bool SnapsToPartyWindow::FetchPartyInfo()
     if (!info) {
         return false;
     }
-    for (auto str : party_names_by_index) {
+    for (const auto& str : party_names_by_index) {
         if (str->IsDecoding())
             return false; // Wait for last pass before retry
     }
@@ -117,9 +117,9 @@ bool SnapsToPartyWindow::FetchPartyInfo()
         party_indeces_by_agent_id[agent_id] = party_agent_ids_by_index.size();
         party_agent_ids_by_index.push_back(agent_id);
         while (party_names_by_index.size() < party_agent_ids_by_index.size()) {
-            party_names_by_index.push_back(new GuiUtils::EncString());
+            party_names_by_index.push_back(std::make_unique<GuiUtils::EncString>());
         }
-        const auto str = party_names_by_index[party_agent_ids_by_index.size() - 1];
+        auto* str = party_names_by_index[party_agent_ids_by_index.size() - 1].get();
         str->reset(enc_name ? enc_name : GW::Agents::GetAgentEncName(agent_id))
             ->wstring(); // Trigger decode
         };
@@ -163,7 +163,7 @@ void SnapsToPartyWindow::Initialize()
 {
     ToolboxWidget::Initialize();
     is_movable = is_resizable = false;
-    GW::UI::RegisterUIMessageCallback(&OnUIMessage_HookEntry, GW::UI::UIMessage::kPreferenceValueChanged, OnUIMessage, 0x8000);
+    RegisterUIMessageCallback(&OnUIMessage_HookEntry, GW::UI::UIMessage::kPreferenceValueChanged, OnUIMessage, 0x8000);
 }
 
 void SnapsToPartyWindow::Terminate()
@@ -194,24 +194,8 @@ bool SnapsToPartyWindow::RecalculatePartyPositions() {
     ImVec2 top_left;
     ImVec2 bottom_right;
     const auto party = GW::PartyMgr::GetPartyInfo();
-    // @Cleanup: Fetch party frame once, only update when it has been destroyed
-    const auto party_frame = party ? GW::UI::GetFrameByLabel(L"Party") : nullptr;
-    if (!(party_frame && party_frame->IsVisible()))
-        return false;
-
-    // Traverse to health bars
-    if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost) {
-        auto sub_frame = GW::UI::GetChildFrame(party_frame, 1);
-        sub_frame = GW::UI::GetChildFrame(sub_frame, 8);
-        sub_frame = GW::UI::GetChildFrame(sub_frame, 0);
-        sub_frame = GW::UI::GetChildFrame(sub_frame, 0);
-        party_window_health_bars = GW::UI::GetChildFrame(sub_frame, 0);
-    }
-    else {
-        auto sub_frame = GW::UI::GetChildFrame(party_frame, 0);
-        sub_frame = GW::UI::GetChildFrame(sub_frame, 0);
-        party_window_health_bars = GW::UI::GetChildFrame(sub_frame, 0);
-    }
+    GW::UI::Frame* party_frame = 0;
+    party_window_health_bars = GetPartyWindowHealthBars(&party_frame);
 
     if (!party_window_health_bars)
         return false;
@@ -241,10 +225,10 @@ bool SnapsToPartyWindow::RecalculatePartyPositions() {
         const auto player_container = GW::UI::GetChildFrame(player_health_bars, player.login_number);
         agent_health_bar = GW::UI::GetChildFrame(player_container, 0);
         if (!agent_health_bar)
-            return false;
+            continue;
         const auto agent_id = GW::PlayerMgr::GetPlayerAgentId(player.login_number);
         if (!agent_id)
-            return false;
+            continue;
         GetFramePosition(agent_health_bar, relative_to, &top_left, &bottom_right);
         agent_health_bar_positions[agent_id] = { top_left, bottom_right };
         for (auto& hero : party->heroes) {

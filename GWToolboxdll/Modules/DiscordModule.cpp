@@ -16,7 +16,6 @@ NOTE: Disconnecting/reconnecting will mess this up so repeat process.
 
 #include <GWCA/Context/GameContext.h>
 #include <GWCA/Context/CharContext.h>
-#include <GWCA/Context/WorldContext.h>
 
 #include <GWCA/GameEntities/Party.h>
 #include <GWCA/GameEntities/Map.h>
@@ -146,19 +145,6 @@ namespace {
         "Swat",
         "Dev Region"
     };
-    const char* profession_names[] = {
-        "No Profession",
-        "Warrior",
-        "Ranger",
-        "Monk",
-        "Necromancer",
-        "Mesmer",
-        "Elementalist",
-        "Assassin",
-        "Ritualist",
-        "Paragon",
-        "Dervish"
-    };
 
     const char* map_languages[] = {
         "English",
@@ -211,14 +197,8 @@ namespace {
     IDiscordNetworkEvents network_events{};
     IDiscordCoreEvents core_events{};
 
-    // setting vars
-    bool discord_enabled = true;
-    bool hide_activity_when_offline = true;
-    bool show_location_info = true;
-    bool show_character_info = true;
-    bool show_party_info = true;
+    DiscordModule::Settings settings;
 
-    // runtime vars
     bool discord_connected = false;
     time_t zone_entered_time = 0;
     bool pending_activity_update = false;
@@ -274,7 +254,6 @@ namespace {
         Log::Log("Discord Log Level %d: %s\n", level, message);
     }
 
-    // Get pid from executable name (i.e. DiscordCanary.exe)
     DWORD GetProcId(const char* ProcName)
     {
         PROCESSENTRY32 pe32;
@@ -448,7 +427,6 @@ namespace {
             return false;
         }
 
-        // resolve function address here
         discordCreate = (DiscordCreate_pt)(uintptr_t)GetProcAddress(hGetProcIDDLL, "DiscordCreate");
         if (!discordCreate) {
             ASSERT(UnloadDll());
@@ -487,7 +465,7 @@ namespace {
     bool Connect()
     {
         pending_discord_connect = false;
-        if (!discord_enabled || !LoadDll()) {
+        if (!settings.discord_enabled || !LoadDll()) {
             return false; // Failed to hook into discord_game_sdk.dll
         }
         if (discord_connected) {
@@ -562,7 +540,7 @@ namespace {
                 return; // Current gh not found - guild array not loaded yet
             }
         }
-        const bool show_activity = !hide_activity_when_offline || GW::FriendListMgr::GetMyStatus() != GW::FriendStatus::Offline;
+        const bool show_activity = !settings.hide_activity_when_offline || GW::FriendListMgr::GetMyStatus() != GW::FriendStatus::Offline;
         if (!show_activity) {
             Disconnect(); // Disconnect from discord if we're set to offline
             return;
@@ -588,7 +566,7 @@ namespace {
             const auto map_language = static_cast<short>(GW::Map::GetLanguage());
             const auto map_district = static_cast<short>(GW::Map::GetDistrict());
             char party_id[128];
-            if (show_party_info) {
+            if (settings.show_party_info) {
                 // Party ID needs to be consistent across maps
                 if (instance_type == GW::Constants::InstanceType::Explorable) {
                     sprintf(party_id, "%d-%d", c->token1, map_id);
@@ -625,12 +603,12 @@ namespace {
                 activity.party.size.max_size = static_cast<int32_t>(m->max_party_size);
             }
 
-            if (show_character_info) {
+            if (settings.show_character_info) {
                 sprintf(activity.assets.small_image, "profession_%d_512px", a->primary);
-                sprintf(activity.assets.small_text, "%S (%s)", GW::GetGameContext()->character->player_name, profession_names[a->primary]);
+                sprintf(activity.assets.small_text, "%S (%s)", GW::GetGameContext()->character->player_name, ToolboxUtils::GetProfessionName(static_cast<GW::Constants::Profession>(a->primary))->string().c_str());
             }
 
-            if (show_location_info) {
+            if (settings.show_location_info) {
                 // Details
                 map_name_decoded.reset(m->name_id);
                 if (map_name_decoded.wstring().empty()) {
@@ -680,7 +658,6 @@ namespace {
             }
         }
         if (memcmp(&last_activity, &activity, sizeof(last_activity)) != 0) {
-            // Only update if activity is new.
             last_activity_update = time(nullptr);
             if (show_activity) {
                 Log::Log("Outgoing discord state = %s, %s\n", activity.details, activity.state);
@@ -712,10 +689,10 @@ void DiscordModule::Terminate()
 void DiscordModule::Initialize()
 {
     ToolboxModule::Initialize();
+    SettingsRegistry::Register(this, settings);
 
     strcpy(activity.name, "Guild Wars");
     activity.application_id = DISCORD_APP_ID;
-    // Initialise discord objects
     memset(&app, 0, sizeof(app));
     memset(&activities_events, 0, sizeof(activities_events));
     memset(&network_events, 0, sizeof(network_events));
@@ -739,7 +716,7 @@ void DiscordModule::Initialize()
 
 
     for (auto message_id : ui_messages) {
-        GW::UI::RegisterUIMessageCallback(&PostUIMessage_HookEntry, message_id, OnPostUIMessage, 0x4000);
+        RegisterUIMessageCallback(&PostUIMessage_HookEntry, message_id, OnPostUIMessage, 0x4000);
     }
 
     if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable) {
@@ -756,18 +733,29 @@ void DiscordModule::Initialize()
                                         Log::LogW(L"Failed to load discord_game_sdk.dll. To try again, please restart GWToolbox\n%s", error.c_str());
                                         return;
                                     }
-                                    pending_discord_connect = pending_activity_update = discord_enabled;
+                                    pending_discord_connect = pending_activity_update = settings.discord_enabled;
                                 });
 
 
 }
 
+void DiscordModule::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
+{
+    ToolboxModule::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
+}
+
+void DiscordModule::SaveSettings(SettingsDoc& doc)
+{
+    ToolboxModule::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
+}
+
 void DiscordModule::DrawSettingsInternal()
 {
     bool edited = false;
-    edited |= ImGui::Checkbox("Enable Discord integration", &discord_enabled);
-    ImGui::ShowHelp("Allows GWToolbox to send in-game information to Discord");
-    if (discord_enabled) {
+    edited |= ImGui::CheckboxWithHelp("Enable Discord integration", &settings.discord_enabled, "Allows GWToolbox to send in-game information to Discord");
+    if (settings.discord_enabled) {
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Text, discord_connected ? ImVec4(0, 1, 0, 1) : ImVec4(1, 0, 0, 1));
         if (ImGui::Button(discord_connected ? "Connected" : "Disconnected", ImVec2(0, 0))) {
@@ -784,48 +772,24 @@ void DiscordModule::DrawSettingsInternal()
         }
 
         ImGui::Indent();
-        edited |= ImGui::Checkbox("Hide in-game info when appearing offline", &hide_activity_when_offline);
-        ImGui::ShowHelp("Setting your status to offline in friend list hides your info from Discord");
+        edited |= ImGui::CheckboxWithHelp("Hide in-game info when appearing offline", &settings.hide_activity_when_offline, "Setting your status to offline in friend list hides your info from Discord");
 
-        edited |= ImGui::Checkbox("Display in-game location info", &show_location_info);
-        ImGui::ShowHelp("e.g. 'Sifhalla, America English 1'");
+        edited |= ImGui::CheckboxWithHelp("Display in-game location info", &settings.show_location_info, "e.g. 'Sifhalla, America English 1'");
 
-        edited |= ImGui::Checkbox("Display character info", &show_character_info);
-        ImGui::ShowHelp("i.e. Profession icon and character name");
+        edited |= ImGui::CheckboxWithHelp("Display character info", &settings.show_character_info, "i.e. Profession icon and character name");
 
-        edited |= ImGui::Checkbox("Display party info", &show_party_info);
-        ImGui::ShowHelp("Allows other players to join you when in an outpost,\nalso shows current party status e.g. (3 of 8)");
+        edited |= ImGui::CheckboxWithHelp("Display party info", &settings.show_party_info, "Allows other players to join you when in an outpost,\nalso shows current party status e.g. (3 of 8)");
         ImGui::Unindent();
     }
     if (edited) // Picked up in the Update() loop
     {
-        pending_discord_connect = pending_activity_update = discord_enabled;
+        pending_discord_connect = pending_activity_update = settings.discord_enabled;
     }
-}
-
-void DiscordModule::SaveSettings(ToolboxIni* ini)
-{
-    ToolboxModule::SaveSettings(ini);
-    SAVE_BOOL(discord_enabled);
-    SAVE_BOOL(hide_activity_when_offline);
-    SAVE_BOOL(show_location_info);
-    SAVE_BOOL(show_character_info);
-    SAVE_BOOL(show_party_info);
-}
-
-void DiscordModule::LoadSettings(ToolboxIni* ini)
-{
-    ToolboxModule::LoadSettings(ini);
-    LOAD_BOOL(discord_enabled);
-    LOAD_BOOL(hide_activity_when_offline);
-    LOAD_BOOL(show_location_info);
-    LOAD_BOOL(show_character_info);
-    LOAD_BOOL(show_party_info);
 }
 
 void DiscordModule::Update(const float)
 {
-    if (!discord_enabled && discord_connected) {
+    if (!settings.discord_enabled && discord_connected) {
         Disconnect();
     }
     if (pending_discord_connect) {

@@ -1,7 +1,6 @@
 #include "stdafx.h"
 
 #include "Settings.h"
-#include "Registry.h"
 
 Settings settings;
 
@@ -20,8 +19,9 @@ void PrintUsage(const bool terminate)
 
             "    /asadmin                   GWToolbox will try to run as admin\n"
             "    /noupdate                  Won't try to update\n"
+            "    /noexecheck                Won't check Github for a newer GWToolbox.exe\n"
             "    /noinstall                 Won't try to install if missing\n"
-            "    /localdll                  Check launcher directory for toolbox dll, won't try to install or update\n\n"
+            "    /localdll                  Check launcher directory for toolbox dll (or gwtoolbox.gwmod for a wasm client), won't try to install or update\n\n"
 
             "    /pid <process id>          Process id of the target in which to inject\n"
     );
@@ -91,6 +91,9 @@ void ParseCommandLine()
         else if (wcscmp(arg, L"/noupdate") == 0) {
             settings.noupdate = true;
         }
+        else if (wcscmp(arg, L"/noexecheck") == 0) {
+            settings.noexecheck = true;
+        }
         else if (wcscmp(arg, L"/help") == 0) {
             settings.help = true;
         }
@@ -125,7 +128,6 @@ void ParseCommandLine()
 
 bool IsRunningAsAdmin()
 {
-    // Allocate and initialize a SID of the administrators group.
     PSID AdministratorsGroup = nullptr;
     SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
     if (!AllocateAndInitializeSid(
@@ -139,8 +141,6 @@ bool IsRunningAsAdmin()
         return false;
     }
 
-    // Determine whether the SID of administrators group is enabled in
-    // the primary access token of the process.
     BOOL IsRunAsAdmin = FALSE;
     if (!CheckTokenMembership(nullptr, AdministratorsGroup, &IsRunAsAdmin)) {
         FreeSid(AdministratorsGroup);
@@ -197,6 +197,11 @@ bool Restart(const wchar_t* args, const bool force_admin)
         fprintf(stderr, "GetCurrentDirectoryW failed: %lu\n", GetLastError());
         return false;
     }
+    // stderr is redirected to GWToolbox.error.log; release that handle before spawning the replacement so the
+    // new instance can open the log for writing while this one is still exiting.
+    FILE* stream;
+    freopen_s(&stream, "NUL", "w", stderr);
+
     const bool is_admin = force_admin ? true : IsRunningAsAdmin();
     CreateProcessInt(path, args, workdir, is_admin);
     ExitProcess(0);
@@ -324,6 +329,10 @@ LRESULT SettingsWindow::WndProc(HWND hWnd, const UINT uMsg, const WPARAM wParam,
         case WM_COMMAND:
             OnCommand(reinterpret_cast<HWND>(lParam), LOWORD(wParam), HIWORD(wParam));
             break;
+
+        case WM_DPICHANGED:
+            OnDpiChanged(wParam, lParam);
+            break;
     }
 
     return DefWindowProcW(hWnd, uMsg, wParam, lParam);
@@ -331,14 +340,16 @@ LRESULT SettingsWindow::WndProc(HWND hWnd, const UINT uMsg, const WPARAM wParam,
 
 void SettingsWindow::OnCreate(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+    ApplyDpiScaling(hWnd);
+
     m_hNoUpdate = CreateWindowW(
         WC_BUTTONW,
         L"Never check for update",
         WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_CHECKBOX,
-        10,
-        10,
-        150,
-        15,
+        Scale(10),
+        Scale(10),
+        Scale(150),
+        Scale(15),
         hWnd,
         nullptr,
         m_hInstance,
@@ -349,10 +360,10 @@ void SettingsWindow::OnCreate(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
         WC_BUTTONW,
         L"Always start as admin",
         WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_CHECKBOX,
-        10,
-        30,
-        150,
-        15,
+        Scale(10),
+        Scale(30),
+        Scale(150),
+        Scale(15),
         hWnd,
         nullptr,
         m_hInstance,

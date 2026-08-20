@@ -6,8 +6,8 @@ If you are here to check toolbox features or for a download link, go to [https:/
 
 ## How to download, build, and run
 ### Requirements
-* Visual Studio 2022 version 17.10+. You can download [Visual Studio Community](https://visualstudio.microsoft.com/vs/community/) for free. You will also need the "Desktop development with C++" package.
-* C++23 compatible v143 MSVC Platform Toolset
+* Visual Studio 2026 version 18.0+. You can download [Visual Studio Community](https://visualstudio.microsoft.com/vs/community/) for free. You will also need the "Desktop development with C++" package.
+* C++23 compatible v144 MSVC Platform Toolset
 * Windows 11 SDK
 * CMake 3.29 or higher. This is integrated in the [Visual Studio Developer PowerShell](https://learn.microsoft.com/en-us/visualstudio/ide/reference/command-prompt-powershell?view=vs-2022). Alternatively download the latest version from [https://cmake.org/download/](https://cmake.org/download/).
 * vcpkg. This is integrated in the [Visual Studio Developer PowerShell](https://learn.microsoft.com/en-us/visualstudio/ide/reference/command-prompt-powershell?view=vs-2022). Alternatively download the latest version from [https://github.com/microsoft/vcpkg/releases/](https://github.com/microsoft/vcpkg/releases/latest).
@@ -28,6 +28,29 @@ If you are here to check toolbox features or for a download link, go to [https:/
 6. Build the solution. `cmake --build build --config RelWithDebInfo`
 
 7. Run.
+
+## Building on Linux (Docker + Wine)
+
+GWToolboxdll can also be cross-compiled from Linux using a real MSVC toolchain running under Wine, packaged in a Docker image.
+
+### Requirements
+* [Docker](https://docs.docker.com/get-docker/)
+
+### Steps
+1. Clone the repository and `cd` into it.
+2. Build: `./scripts/build-wine-prefix.sh`
+
+The first run builds the Docker image (downloads MSVC + Windows SDK, expect it to take a while), then configures and builds `GWToolboxdll` into `bin/GWToolboxdll.dll`. Later runs reuse the cached image and only rebuild changed files.
+
+Useful options (see `./scripts/build-wine-prefix.sh --help`):
+* `--target <name>` - build a different CMake target (default: `GWToolboxdll`; use `all` for everything)
+* `--config <Debug|RelWithDebInfo|Release>` - CMake config to build (default: `RelWithDebInfo`)
+* `--shell` - drop into a shell in the build container instead of building
+* `--rebuild-image` - force a clean rebuild of the Docker image
+
+Notes:
+* The container runs as root; the script hands ownership of any files it writes back to your user once done.
+* Build output lives in `build-wine/` (gitignored). Delete it for a fully clean reconfigure, e.g. after switching `--config` or branches.
 
 ## Notes
 * GWToolbox compiles as a DLL (`GWToolboxdll.dll`) and EXE (`GWToolbox.exe`). The exe lets you select a Guild Wars Client and injects the dll, but you can also use other dll injectors of your choice.
@@ -91,12 +114,13 @@ For developers: there are a few things you should take note of:
 **[Misty](https://github.com/Hour-of-the-Owl)/[DarkManic](https://github.com/DarkManic)**
 * Extensive work on the site and documentation.
 
-**[JetBrains](https://github.com/JetBrains)**
-* <img src="https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.png" alt="JetBrains Logo" width="23" style="float: left" /> Providing core contributors with <a href="https://www.jetbrains.com/community/opensource">OSS Development Licenses</a>
-
 **Everyone who [proposed a PR](https://github.com/gwdevhub/GWToolboxpp/pulls?q=is%3Apr+is%3Amerged)**
 
 **and everyone suggesting ideas!**
 
 
 All images in `resources/icons` are from www.flaticon.com
+
+## Sponsors
+
+- The community of users who donate. All proceeds are invested only into server-costs, visible on OpenCollective, we do not pay ourselves.

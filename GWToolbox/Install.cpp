@@ -2,7 +2,9 @@
 
 #include <Path.h>
 #include "Download.h"
+#include "Inject.h"
 #include "Install.h"
+#include "WasmInject.h"
 #include "WindowsDefender.h"
 
 namespace fs = std::filesystem;
@@ -110,10 +112,37 @@ bool DeleteInstallationDirectory(std::wstring& error)
     return true;
 }
 
+// Optional: copies gwtoolbox.gwmod alongside the installed dll if one sits next to the launcher (no release asset exists yet); its absence is the ordinary case and must never fail Install().
+static void InstallLocalWasmGwmodIfPresent(const fs::path& install_path)
+{
+    fs::path source_dir;
+    if (!PathGetProgramDirectory(source_dir)) return;
+    const fs::path source = source_dir / WASM_GWMOD_FILENAME;
+    if (!fs::exists(source)) return;
+
+    const fs::path dest = install_path.parent_path() / WASM_GWMOD_FILENAME;
+    if (source == dest) return;
+    if (!PathSafeCopy(source, dest, true)) {
+        fprintf(stderr, "Found %S but failed to copy it to %S\n", source.c_str(), dest.c_str());
+    }
+}
+
 bool Install(const bool quiet, std::wstring& error)
 {
     if (IsInstalled())
         return true;
+
+    // Grant the exclusion and Controlled Folder Access permissions before writing into Documents, so CFA can't block the install.
+    fs::path docs_dir;
+    if (PathGetDocumentsPath(docs_dir, L"GWToolboxpp")) {
+        std::vector<fs::path> cfa_apps = GetGuildWarsExecutablePaths();
+        fs::path running_exe;
+        if (PathGetExeFullPath(running_exe))
+            cfa_apps.push_back(running_exe); // the launcher doing the writing right now (e.g. from Downloads)
+        cfa_apps.push_back(docs_dir / L"GWToolbox.exe"); // the installed copy, once it exists
+        AddDefenderExceptions(docs_dir, cfa_apps, quiet, error); // Silent fail, it shows its own messages
+    }
+
     fs::path install_path = EnsureInstallationDirectoryExist();
     if (install_path.empty())
         return error = L"EnsureInstallationDirectoryExist failed", false;
@@ -121,7 +150,7 @@ bool Install(const bool quiet, std::wstring& error)
     if (!CopyInstaller())
         return error = L"CopyInstaller failed", false;
 
-    if (!DownloadWindow::DownloadAllFiles(error))
+    if (!DownloadWindow::DownloadDll(error))
         return false;
     const auto dll_path = install_path.parent_path() / "GWToolboxdll.dll";
     if (!fs::exists(dll_path)) {
@@ -130,15 +159,17 @@ bool Install(const bool quiet, std::wstring& error)
                    dll_path.parent_path().wstring()
                ), false;
     }
-    AddDefenderExclusion(install_path.parent_path(), quiet, error); // Silent fail, it'll show messages etc
     if (!IsInstalled()) {
         return error = std::format(
                    L"IsInstalled() returned false after installation; it may have been quarantined by anti virus software!\n\nExclude the {} directory in your anti virus settings and re-launch.", dll_path.wstring(),
                    dll_path.parent_path().wstring()
                ), false;
     }
+
+    InstallLocalWasmGwmodIfPresent(install_path);
+
     if (!quiet) {
-        MessageBoxW(nullptr, L"Installation successful", L"Installation", 0);
+        ShowMessageBoxW(nullptr, L"Installation successful", L"Installation", 0);
     }
 
     return true;
@@ -148,7 +179,7 @@ bool Uninstall(const bool quiet, std::wstring& error)
 {
     bool DeleteAllFiles = true;
     if (quiet == false) {
-        const int iRet = MessageBoxW(
+        const int iRet = ShowMessageBoxW(
             nullptr,
             L"Do you want to delete *all* possible files from installation folder? (Default: no)\n",
             L"Uninstallation",
@@ -160,12 +191,11 @@ bool Uninstall(const bool quiet, std::wstring& error)
     }
 
     if (DeleteAllFiles) {
-        // Delete all files
         DeleteInstallationDirectory(error);
     }
 
     if (quiet == false) {
-        MessageBoxW(nullptr, L"Uninstallation successful", L"Uninstallation", 0);
+        ShowMessageBoxW(nullptr, L"Uninstallation successful", L"Uninstallation", 0);
     }
 
     return true;

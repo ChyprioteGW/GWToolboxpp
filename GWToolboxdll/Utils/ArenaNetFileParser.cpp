@@ -1,9 +1,8 @@
 #include "ArenaNetFileParser.h"
 #include <algorithm>
 #include <cstring>
-#include <fstream>
 #include <vector>
-#include <Modules/GwDatTextureModule.h>
+#include <Modules/GwDatModule.h>
 
 namespace {
     // FVF lookup tables (from the pattern)
@@ -13,7 +12,6 @@ namespace {
 
     static constexpr uint32_t fvf_array_2[16] = {0x0, 0xC, 0x4, 0x10, 0xC, 0x18, 0x10, 0x1C, 0x4, 0x10, 0x8, 0x14, 0x10, 0x1C, 0x14, 0x20};
 
-    // Helper functions
     uint32_t getFVF(uint32_t dat_fvf) {
         return ((dat_fvf & 0xff0) << 4) | ((dat_fvf >> 8) & 0x30) | (dat_fvf & 0xf);
     }
@@ -37,10 +35,10 @@ namespace ArenaNetFileParser {
         return 0;
     }
 
-    char* GameAssetFile::fileType()
+    const char* GameAssetFile::fileType() const
     {
         if (data_size < 4) return 0;
-        return (char*)data.data(); // Read file type from the first 4 bytes
+        return (const char*)data.data(); // Read file type from the first 4 bytes
     }
     bool GameAssetFile::parse(std::vector<uint8_t>& _data)
     {
@@ -48,16 +46,19 @@ namespace ArenaNetFileParser {
         data_size = data.size();
         return isValid();
     }
-    bool GameAssetFile::readFromDat(const uint32_t file_id, uint32_t stream_id)
+    bool GameAssetFile::readFromDat(const uint32_t _file_id, uint32_t stream_id)
     {
         wchar_t fileHash[4] = {0};
-        FileIdToFileHash(file_id, fileHash);
+        FileIdToFileHash(_file_id, fileHash);
         return readFromDat(fileHash, stream_id);
     }
     bool GameAssetFile::readFromDat(const wchar_t* file_hash, uint32_t stream_id)
     {
         std::vector<uint8_t> bytes;
-        if (!GwDatTextureModule::ReadDatFile(file_hash, &bytes, stream_id)) return false;
+        file_id = FileHashToFileId(file_hash);
+        data_size = 0;
+        data.clear();
+        if (!GwDatModule::ReadDatFile(file_hash, &bytes, stream_id)) return false;
         return parse(bytes);
     }
     const uint8_t ArenaNetFile::getFFNAType() const
@@ -74,12 +75,13 @@ namespace ArenaNetFileParser {
     {
         ASSERT(isValid());
         size_t offset = 5;
-        // Parse chunk headers and record their locations
-        while (offset < data_size) {
+        while (offset + 8 <= data_size) {
             const auto chunk = (Chunk*)&data[offset];
             if (chunk->chunk_id == chunk_type)
                 return chunk;
-            offset += chunk->chunk_size + 8;
+            const uint64_t next = static_cast<uint64_t>(offset) + chunk->chunk_size + 8ull;
+            if (next > data_size) break;
+            offset = static_cast<size_t>(next);
         }
         return nullptr;
     }

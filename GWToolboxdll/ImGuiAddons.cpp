@@ -6,6 +6,26 @@
 #include <Keys.h>
 
 namespace {
+    // Renders text rotated clockwise by angle_rad around center on draw list dl.
+    void RenderTextRotated(ImDrawList* dl, ImVec2 center, ImU32 col, const char* text, float angle_rad)
+    {
+        if (!text || !*text)
+            return;
+        const ImVec2 sz = ImGui::CalcTextSize(text);
+        const float cos_a = cosf(angle_rad);
+        const float sin_a = sinf(angle_rad);
+        const int vtx0 = dl->VtxBuffer.Size;
+        dl->AddText({center.x - sz.x * 0.5f, center.y - sz.y * 0.5f}, col, text);
+        // CW rotation: (dx, dy) -> (dx*cos + dy*sin, -dx*sin + dy*cos)
+        for (int i = vtx0; i < dl->VtxBuffer.Size; i++) {
+            ImDrawVert& v = dl->VtxBuffer[i];
+            const float dx = v.pos.x - center.x;
+            const float dy = v.pos.y - center.y;
+            v.pos.x = center.x + dx * cos_a + dy * sin_a;
+            v.pos.y = center.y - dx * sin_a + dy * cos_a;
+        }
+    }
+
     ImGui::ImGuiContextMenuCallback imguiaddons_context_menu_callback = nullptr;
     void* imguiaddons_context_menu_wparam = nullptr;
     const char* imguiaddons_context_menu_id = "###imguiaddons_context_menu";
@@ -29,7 +49,6 @@ namespace ImGui {
     {
         if ((col & IM_COL32_A_MASK) == 0) return;
 
-        // Calculate scale to fit within max dimensions while preserving aspect ratio
         float scale_x = max_width / size.x;
         float scale_y = max_height / size.y;
         float scale = (scale_x < scale_y) ? scale_x : scale_y;
@@ -40,22 +59,24 @@ namespace ImGui {
         ImVec2 scaled_size = ImVec2(size.x * scale, size.y * scale);
         ImVec2 p_max = ImVec2(p_min.x + scaled_size.x, p_min.y + scaled_size.y);
 
-        const bool push_texture_id = user_texture_id != draw_list->_CmdHeader.TextureId;
-        if (push_texture_id) draw_list->PushTextureID(user_texture_id);
+        ImTextureRef tex_ref(user_texture_id);
+        const bool push_texture = tex_ref.GetTexID() != draw_list->_CmdHeader.TexRef.GetTexID();
+        if (push_texture) draw_list->PushTexture(tex_ref);
 
         draw_list->PrimReserve(6, 4);
         draw_list->PrimRectUV(p_min, p_max, uv_min, uv_max, col);
 
-        if (push_texture_id) draw_list->PopTextureID();
+        if (push_texture) draw_list->PopTexture();
     }
 
-    bool InputText(const char* label, std::string& buf, ImGuiInputTextFlags flags, ImGuiInputTextCallback callback, void* user_data)
+    bool InputText(const char* label, std::string& buf, size_t max_length, ImGuiInputTextFlags flags, ImGuiInputTextCallback callback, void* user_data)
     {
-        if (InputText(label, buf.data(), (int)buf.capacity(), flags, callback, user_data)) {
-            buf.resize(strlen(buf.data()) + 1);
-            return true;
-        }
-        return false;
+        // Resize to max_length so ImGui can write up to max_length chars into a fully-initialised
+        // buffer. This avoids UB from writing past buf.size() and ensures capacity >= max_length+1.
+        buf.resize(max_length, '\0');
+        const bool changed = InputText(label, buf.data(), max_length + 1, flags, callback, user_data);
+        buf.resize(strnlen(buf.data(), max_length));
+        return changed;
     }
 
     void SetTooltip(std::function<void()> tooltip_callback)
@@ -66,34 +87,29 @@ namespace ImGui {
         EndTooltip();
     }
 
-    void PushFont(ImFont* font, float font_size) {
-        ImGui::PushFont(font);
+    float GetIndent()
+    {
         ImGuiContext& g = *GImGui;
-        if (font_size >= 0.f) {
-            g.FontBaseSize = g.IO.FontGlobalScale * font_size * g.Font->Scale;
-            g.FontSize = g.FontBaseSize;
-            g.DrawListSharedData.FontSize = g.FontSize;
-        }
+        return g.CurrentWindow->DC.Indent.x;
     }
+
 
     void PushFont(ImFont* font, ImDrawList* draw_list, float font_size) {
         ImGui::PushFont(font, font_size);
-        ImGuiContext& g = *GImGui;
-        if (g.CurrentWindow && g.CurrentWindow->DrawList != draw_list) {
-            draw_list->PushTextureID(font->ContainerAtlas->TexID);
+        if (draw_list && draw_list != ImGui::GetWindowDrawList()) {
+            draw_list->PushTexture(GImGui->Font->OwnerAtlas->TexRef);
         }
     }
     void PopFont(ImDrawList* draw_list) {
-        ImGui::PopFont();
-        ImGuiContext& g = *GImGui;
-        if (g.CurrentWindow && g.CurrentWindow->DrawList != draw_list) {
-            draw_list->PopTextureID();
+        if (draw_list && draw_list != ImGui::GetWindowDrawList()) {
+            draw_list->PopTexture();
         }
+        ImGui::PopFont();
     }
 
     const float& FontScale()
     {
-        return GetIO().FontGlobalScale;
+        return GetStyle().FontScaleMain;
     }
 
     void StartSpacedElements(const float width, const bool include_font_scaling)
@@ -156,7 +172,6 @@ namespace ImGui {
     {
         bool value_changed = false;
 
-        // Choose input function and flags based on whether we have a hint
         ImGuiInputTextFlags flags = (show_password  && *show_password) ? ImGuiInputTextFlags_None : ImGuiInputTextFlags_Password;
 
 
@@ -185,6 +200,13 @@ namespace ImGui {
         }
     }
 
+    bool CheckboxWithHelp(const char* label, bool* v, const char* help_text)
+    {
+        const bool result = Checkbox(label, v);
+        ShowHelp(help_text);
+        return result;
+    }
+
     void TextShadowed(const char* label, const ImVec2 offset, const ImVec4& shadow_color)
     {
         const ImVec2 pos = GetCursorPos();
@@ -194,6 +216,25 @@ namespace ImGui {
         ImGui::PopStyleColor();
         SetCursorPos(pos);
         TextUnformatted(label);
+    }
+
+    void TextOutlined(const char* label, float offset, ImU32 outline_color)
+    {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImVec2 pos = ImGui::GetCursorScreenPos();
+        ImFont* font = ImGui::GetFont();
+        const float size = ImGui::GetFontSize();
+
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                if (dx == 0 && dy == 0) continue;
+                dl->AddText(font, size, ImVec2(pos.x + dx * offset, pos.y + dy * offset), outline_color, label);
+            }
+        }
+
+        dl->AddText(font, size, pos, ImGui::GetColorU32(ImGuiCol_Text), label);
+
+        ImGui::Dummy(ImGui::CalcTextSize(label));
     }
 
     void SetNextWindowCenter(const ImGuiWindowFlags flags)
@@ -253,8 +294,6 @@ namespace ImGui {
 
     bool SmallConfirmButton(const char* label, const char* confirm_content, ImGui::ImGuiConfirmDialogCallback callback, void* wparam)
     {
-        static char id_buf[128];
-        snprintf(id_buf, sizeof(id_buf), "%s##confirm_popup%p", label, label);
         if (SmallButton(label)) {
             ConfirmDialog(confirm_content, callback, wparam);
             return true;
@@ -300,24 +339,39 @@ namespace ImGui {
         return pressedKeys;
     }
 
+    bool BeginConfirmTrigger(const char* confirm_id, bool triggered)
+    {
+        if (triggered) {
+            OpenPopup(confirm_id);
+        }
+        if (BeginPopupModal(confirm_id, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            return true;
+        }
+        return false;
+    }
+
+    void EndConfirmTrigger(bool* confirm_bool)
+    {
+        if (Button("OK", ImVec2(120, 0)) || IsKeyReleased(ImGuiKey_Enter)) {
+            *confirm_bool = true;
+            CloseCurrentPopup();
+        }
+        SameLine();
+        if (Button("Cancel", ImVec2(120, 0))) {
+            CloseCurrentPopup();
+        }
+        EndPopup();
+    }
     bool ConfirmButton(const char* label, bool* confirm_bool, const char* confirm_content)
     {
         static char id_buf[128];
-        snprintf(id_buf, sizeof(id_buf), "%s##confirm_popup%p", label, confirm_bool);
-        if (Button(label)) {
-            OpenPopup(id_buf);
-        }
-        if (BeginPopupModal(id_buf, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        const ImGuiID h = ImHashStr(confirm_content, 0, ImHashStr(label));
+        snprintf(id_buf, sizeof(id_buf), "%s###confirm_popup_%u", label, h);
+
+        const bool triggered = Button(label);
+        if (BeginConfirmTrigger(id_buf, triggered)) {
             Text(confirm_content);
-            if (Button("OK", ImVec2(120, 0)) || ImGui::IsKeyReleased(ImGuiKey_Enter)) {
-                *confirm_bool = true;
-                CloseCurrentPopup();
-            }
-            SameLine();
-            if (Button("Cancel", ImVec2(120, 0))) {
-                CloseCurrentPopup();
-            }
-            EndPopup();
+            EndConfirmTrigger(confirm_bool);
         }
         return *confirm_bool;
     }
@@ -328,71 +382,73 @@ namespace ImGui {
             ClosePopup(popup_id);
     }
 
-    bool CompositeIconButton(const char* label, const ImTextureID* icons, size_t icons_len, const ImVec2& size, const ImGuiButtonFlags flags, const ImVec2& icon_size, const ImVec2& uv0, ImVec2 uv1)
+    bool CompositeIconButton(const char* label, ImTextureID* icons, size_t icons_len, const ImVec2& size, const ImGuiButtonFlags flags, const ImVec2& icon_size, const ImVec2& uv0, ImVec2 uv1)
     {
+        const ImVec2 pos = GetCursorScreenPos();
+        const bool has_label = label && *label && strncmp(label,"##",2);
+        const ImVec2 textsize = has_label ? CalcTextSize(label) : ImVec2(0.f, 0.f);
+
         char button_id[128];
-        sprintf(button_id, "###icon_button_%s", label);
-        const ImVec2& pos = GetCursorScreenPos();
-        const ImVec2& textsize = CalcTextSize(label);
+        snprintf(button_id, sizeof(button_id), "###icon_button_%s", label ? label : "");
         const bool clicked = ButtonEx(button_id, size, flags);
 
         ImGuiContext& g = *GImGui;
         const auto clip_rect = g.LastItemData.Rect.ToVec4();
-
-        const ImVec2& button_size = GetItemRectSize();
-        ImVec2 img_size = icon_size;
-        if (icon_size.x > 0.f) {
-            img_size.x = icon_size.x;
-        }
-        if (icon_size.y > 0.f) {
-            img_size.y = icon_size.y;
-        }
-        if (img_size.y == 0.f) {
-            img_size.y = button_size.y - 2.f;
-        }
-        if (img_size.x == 0.f) {
-            img_size.x = img_size.y;
-        }
+        const ImVec2 button_size = GetItemRectSize();
         const ImGuiStyle& style = GetStyle();
-        const float content_width = img_size.x + textsize.x + style.FramePadding.x * 2.f;
-        float content_x = pos.x + style.FramePadding.x;
-        if (content_width < button_size.x) {
-            const float avail_space = button_size.x - content_width;
-            content_x += avail_space * style.ButtonTextAlign.x;
+
+        const float available_h = button_size.y - style.FramePadding.y;
+        const float available_w = button_size.x - style.FramePadding.x;
+
+        float img_h = icon_size.y > 0.f ? icon_size.y : available_h;
+        float img_w = icon_size.x > 0.f ? icon_size.x : img_h;
+
+        // Scale down if icon is larger than the button interior, preserving aspect ratio
+        if (img_h > available_h || img_w > available_w) {
+            const float scale = std::min(available_w / img_w, available_h / img_h);
+            img_w *= scale;
+            img_h *= scale;
         }
-        const float img_x = content_x;
-        const float img_y = pos.y + (button_size.y - img_size.y) / 2.f;
-        const float text_x = img_x + img_size.x + 3.f;
+
+        float img_x;
+        if (has_label) {
+            const float content_width = img_w + style.ItemSpacing.x + textsize.x;
+            float content_x = pos.x + style.FramePadding.x;
+            if (content_width < button_size.x - style.FramePadding.x * 2.f) content_x += (button_size.x - style.FramePadding.x * 2.f - content_width) * style.ButtonTextAlign.x;
+            img_x = content_x;
+        }
+        else {
+            img_x = pos.x + (button_size.x - img_w) / 2.f;
+        }
+        const float img_y = pos.y + (button_size.y - img_h) / 2.f;
+
+        const float text_x = img_x + img_w + style.ItemSpacing.x;
         const float text_y = pos.y + (button_size.y - textsize.y) * style.ButtonTextAlign.y;
-        const auto top_left = ImVec2(img_x, img_y);
-        const auto bottom_right = ImVec2(img_x + img_size.x, img_y + img_size.y);
-        const auto draw_list = GetWindowDrawList();
+
+        ImDrawList* draw_list = GetWindowDrawList();
+        const bool use_custom_uv = uv0.x != uv1.x || uv0.y != uv1.y;
         for (size_t i = 0; i < icons_len; i++) {
-            if (!icons[i])
-                continue;
-            if (uv0.x == uv1.x && uv0.y == uv1.y) {
-                draw_list->AddImage(icons[i], top_left, bottom_right, uv0, CalculateUvCrop(icons[i], img_size));
-            }
-            else {
-                draw_list->AddImage(icons[i], top_left, bottom_right, uv0, uv1);
-            }
+            ImTextureID tex = icons[i];
+            if (!tex) continue;
+            draw_list->AddImage(tex, ImVec2(img_x, img_y), ImVec2(img_x + img_w, img_y + img_h), uv0, use_custom_uv ? uv1 : CalculateUvCrop(tex, ImVec2(img_w, img_h)));
         }
-        if (label) {
-            draw_list->AddText(NULL, 0.0f, ImVec2(text_x, text_y), ImColor(style.Colors[ImGuiCol_Text]), label, nullptr, 0.0f, &clip_rect);
-        }
+        if (has_label) draw_list->AddText(nullptr, 0.f, ImVec2(text_x, text_y), ImColor(style.Colors[ImGuiCol_Text]), label, nullptr, 0.f, &clip_rect);
+
         return clicked;
     }
 
-    bool IconButton(const char* label, const ImTextureID icon, const ImVec2& size, const ImGuiButtonFlags flags, const ImVec2& icon_size)
+    bool IconButton(const char* label, ImTextureID icon, const ImVec2& size, const ImGuiButtonFlags flags, const ImVec2& icon_size)
     {
         return CompositeIconButton(label, &icon, 1, size, flags, icon_size);
     }
 
     bool ColorButtonPicker(const char* label, Color* imcol, const ImGuiColorEditFlags flags)
     {
-        return Colors::DrawSettingHueWheel(label, imcol,
-                                           flags | ImGuiColorEditFlags_AlphaPreview | ImGuiColorEditFlags_NoLabel |
-                                           ImGuiColorEditFlags_NoInputs);
+        auto swatch = Colors::DrawSettingHueWheel(label, imcol, flags | ImGuiColorEditFlags_NoLabel | ImGuiColorEditFlags_NoInputs);
+        if (ImGui::IsItemHovered() && label && *label) {
+            ImGui::SetTooltip(label);
+        }
+        return swatch;
     }
 
     bool MyCombo(const char* label, const char* preview_text, int* current_item, bool (*items_getter)(void*, int, const char**),
@@ -427,9 +483,7 @@ namespace ImGui {
                     || (c >= '0' && c <= '9')
                     || (c >= 'A' && c <= 'Z')
                     || (c >= 'a' && c <= 'z')) {
-                    // build temporary word
                     if (time_since_last_update < word_building_delay) {
-                        // append
                         const size_t i = strnlen(word, 64);
                         if (i + 1 < 64) {
                             word[i] = static_cast<char>(c);
@@ -437,7 +491,6 @@ namespace ImGui {
                         }
                     }
                     else {
-                        // reset
                         word[0] = static_cast<char>(c);
                         word[1] = '\0';
                     }
@@ -483,7 +536,6 @@ namespace ImGui {
             keyboard_selected_now = true;
         }
 
-        // Display items
         bool value_changed = false;
         for (auto i = 0; i < items_count; i++) {
             PushID(reinterpret_cast<void*>(i));
@@ -513,7 +565,7 @@ namespace ImGui {
     
 
     // Get float ratio for height/width of image, e.g. image 200px x 100px would be 2.0f ratio
-    float GetImageRatio(const ImTextureID user_texture_id) {
+    float GetImageRatio(ImTextureID user_texture_id) {
         if (!user_texture_id)
             return .0f;
         const auto texture = static_cast<IDirect3DTexture9*>(user_texture_id);
@@ -525,7 +577,7 @@ namespace ImGui {
     }
 
 
-    ImVec2 CalculateUvCrop(const ImTextureID user_texture_id, const ImVec2& size)
+    ImVec2 CalculateUvCrop(ImTextureID user_texture_id, const ImVec2& size)
     {
         ImVec2 uv1 = {1.f, 1.f};
         float image_ratio = GetImageRatio(user_texture_id);
@@ -544,7 +596,7 @@ namespace ImGui {
     }
 
     // Given a texture, sprite size in px and the offset of the sprite we want, fill out uv0 and uv1 coords for percentage offsets. False on failure.
-    bool GetSpriteUvCoords(const ImTextureID user_texture_id, const ImVec2& single_sprite_size, uint32_t sprite_offset[2], ImVec2* uv0_out, ImVec2* uv1_out)
+    bool GetSpriteUvCoords(ImTextureID user_texture_id, const ImVec2& single_sprite_size, uint32_t sprite_offset[2], ImVec2* uv0_out, ImVec2* uv1_out)
     {
         if (!user_texture_id)
             return false;
@@ -575,11 +627,11 @@ namespace ImGui {
         return true;
     }
 
-    void ImageCropped(const ImTextureID user_texture_id, const ImVec2& size)
+    void ImageCropped(ImTextureID user_texture_id, const ImVec2& size)
     {
         Image(user_texture_id, size, {0, 0}, CalculateUvCrop(user_texture_id, size));
     }
-    void ImageFit(const ImTextureID user_texture_id, const ImVec2& size_of_container) {
+    void ImageFit(ImTextureID user_texture_id, const ImVec2& size_of_container) {
         const auto texture_ratio = GetImageRatio(user_texture_id);
         if (texture_ratio == .0f) return;
 
@@ -588,19 +640,14 @@ namespace ImGui {
         ImVec2 image_size;  // Final image size
         ImVec2 offset = { 0.0f, 0.0f };  // Offset for centering the image
 
-        // Check if texture is wider or taller in relation to the container
         if (texture_ratio > container_ratio) {
-            // The texture is wider, scale by container width
             image_size.x = size_of_container.x;
             image_size.y = size_of_container.x / texture_ratio;
-            // Center the image vertically
             offset.y = (size_of_container.y - image_size.y) * 0.5f;
         }
         else {
-            // The texture is taller, scale by container height
             image_size.y = size_of_container.y;
             image_size.x = size_of_container.y * texture_ratio;
-            // Center the image horizontally
             offset.x = (size_of_container.x - image_size.x) * 0.5f;
         }
 
@@ -615,7 +662,8 @@ namespace ImGui {
         if (window->SkipItems)
             return false;
 
-        return ImageButtonEx(window->GetID(user_texture_id ? user_texture_id : window), user_texture_id, image_size, uv0, uv1, bg_col, tint_col);
+        const auto id_ptr = user_texture_id ? user_texture_id : window;
+        return ImageButtonEx(window->GetID(id_ptr), ImTextureRef(user_texture_id), image_size, uv0, uv1, bg_col, tint_col);
     }
     bool IsKeyDown(long key) {
         return IsKeyDown(static_cast<ImGuiKey>(key));
@@ -627,7 +675,7 @@ namespace ImGui {
         return rect.Contains(GetIO().MousePos);
     }
 
-    void AddImageCropped(const ImTextureID user_texture_id, const ImVec2& top_left, const ImVec2& bottom_right)
+    void AddImageCropped(ImTextureID user_texture_id, const ImVec2& top_left, const ImVec2& bottom_right)
     {
         const ImVec2 size = {bottom_right.x - top_left.x, bottom_right.y - top_left.y};
         GetWindowDrawList()->AddImage(user_texture_id, top_left, bottom_right, {0, 0}, CalculateUvCrop(user_texture_id, size));
@@ -641,7 +689,7 @@ namespace ImGui {
         bool value_changed = false;
         for (size_t i = 0; i < count; i++) {
             PushID(i);
-            if (ColorButton("", palette[i])) {
+            if (ColorButton("", palette[i], flags)) {
                 *palette_index = i;
                 value_changed = true;
             }
@@ -651,10 +699,10 @@ namespace ImGui {
             }
         }
 
-        if (flags & ImGuiColorEditFlags_AlphaPreview) {
+        if (!(flags & ImGuiColorEditFlags_AlphaOpaque)) {
             constexpr ImVec4 col;
             PushID(count);
-            if (ColorButton("", col, ImGuiColorEditFlags_AlphaPreview)) {
+            if (ColorButton("", col, flags)) {
                 *palette_index = count;
                 value_changed = true;
             }
@@ -666,7 +714,6 @@ namespace ImGui {
         return value_changed;
     }
 
-    // Store original positions of the windows
     std::unordered_map<std::string_view, ImVec2> original_positions;
 
     void ClampWindowToScreen(ImGuiWindow* window)
@@ -677,28 +724,23 @@ namespace ImGui {
         const ImVec2 display_size = viewport->Size; // Get the display size
         const std::string_view window_name = window->Name;      // Get the window name
 
-        // Check if the window position needs to be clamped based on the original position if available
         const ImVec2 original_pos = original_positions.contains(window_name) ? original_positions[window_name] : window_pos;
 
-        // Determine if clamping is needed
         const bool needs_clamping = original_pos.x + window_size.x > display_size.x ||
                                     original_pos.y + window_size.y > display_size.y ||
                                     original_pos.x < 0 ||
                                     original_pos.y < 0;
 
         if (needs_clamping) {
-            // Save the original position if not already saved
             if (!original_positions.contains(window_name)) {
                 original_positions[window_name] = window_pos;
             }
 
-            // Clamp window position to ensure the entire content is on screen
             if (window_pos.x + window_size.x > display_size.x) window_pos.x = display_size.x - window_size.x;
             if (window_pos.x < 0) window_pos.x = 0;
             if (window_pos.y + window_size.y > display_size.y) window_pos.y = display_size.y - window_size.y;
             if (window_pos.y < 0) window_pos.y = 0;
 
-            // Set the new window position
             ImGui::SetWindowPos(window, window_pos, ImGuiCond_Always);
             if (window->Collapsed) {
                 original_positions[window_name] = window_pos;
@@ -750,78 +792,12 @@ namespace ImGui {
         return clicked;
     }
 
-    void DrawTextWithShadow(const char* text, const ImVec2& pos,
-                           ImU32 textColor,
-                           ImU32 shadowColor,
-                           float shadowOffset)
-    {
-        ImDrawList* drawList = GetWindowDrawList();
-        drawList->AddText(ImVec2(pos.x + shadowOffset, pos.y + shadowOffset), shadowColor, text);
-        drawList->AddText(pos, textColor, text);
-    }
 
-    void DrawTextWithShadow(const char* text,
-                           ImU32 textColor,
-                           ImU32 shadowColor,
-                           float shadowOffset)
-    {
-        DrawTextWithShadow(text, GetCursorScreenPos(), textColor, shadowColor, shadowOffset);
-        ImVec2 textSize = CalcTextSize(text);
-        SetCursorPosY(GetCursorPosY() + textSize.y);
-    }
-
-    void DrawTextWithOutline(const char* text, const ImVec2& pos,
+    void DrawTextWithOutline(ImDrawList* draw_list, const char* text, const ImVec2& label_pos,
                             ImU32 textColor,
                             ImU32 outlineColor,
                             float thickness)
     {
-        ImDrawList* drawList = GetWindowDrawList();
-
-        drawList->AddText(ImVec2(pos.x - thickness, pos.y), outlineColor, text);
-        drawList->AddText(ImVec2(pos.x + thickness, pos.y), outlineColor, text);
-        drawList->AddText(ImVec2(pos.x, pos.y - thickness), outlineColor, text);
-        drawList->AddText(ImVec2(pos.x, pos.y + thickness), outlineColor, text);
-
-        drawList->AddText(ImVec2(pos.x - thickness, pos.y - thickness), outlineColor, text);
-        drawList->AddText(ImVec2(pos.x + thickness, pos.y - thickness), outlineColor, text);
-        drawList->AddText(ImVec2(pos.x - thickness, pos.y + thickness), outlineColor, text);
-        drawList->AddText(ImVec2(pos.x + thickness, pos.y + thickness), outlineColor, text);
-
-        drawList->AddText(pos, textColor, text);
-    }
-
-    void DrawTextWithOutline(const char* text,
-                            ImU32 textColor,
-                            ImU32 outlineColor,
-                            float thickness)
-    {
-        DrawTextWithOutline(text, GetCursorScreenPos(), textColor, outlineColor, thickness);
-        ImVec2 textSize = CalcTextSize(text);
-        SetCursorPosY(GetCursorPosY() + textSize.y);
-    }
-
-    void DrawTextWithShadow(ImDrawList* draw_list, ImFont* font, const char* text,
-                            const ImVec2& center_pos, ImU32 textColor, ImU32 shadowColor,
-                            float shadowOffset)
-    {
-        ImGui::PushFont(font);
-        const ImVec2 label_size = ImGui::CalcTextSize(text);
-        ImVec2 label_pos(center_pos.x - label_size.x / 2, center_pos.y - label_size.y / 2);
-
-        draw_list->AddText(ImVec2(label_pos.x + shadowOffset, label_pos.y + shadowOffset),
-                          shadowColor, text);
-        draw_list->AddText(label_pos, textColor, text);
-
-        ImGui::PopFont();
-    }
-
-    void DrawTextWithOutline(ImDrawList* draw_list, ImFont* font, const char* text,
-                                 const ImVec2& center_pos, ImU32 textColor, ImU32 outlineColor,
-                                 float thickness)
-    {
-        ImGui::PushFont(font);
-        const ImVec2 label_size = ImGui::CalcTextSize(text);
-        ImVec2 label_pos(center_pos.x - label_size.x / 2, center_pos.y - label_size.y / 2);
 
         draw_list->AddText(ImVec2(label_pos.x - thickness, label_pos.y), outlineColor, text);
         draw_list->AddText(ImVec2(label_pos.x + thickness, label_pos.y), outlineColor, text);
@@ -829,8 +805,99 @@ namespace ImGui {
         draw_list->AddText(ImVec2(label_pos.x, label_pos.y + thickness), outlineColor, text);
 
         draw_list->AddText(label_pos, textColor, text);
+    }
 
-        ImGui::PopFont();
+    void DrawTextWithOutline(const char* text,
+                            ImU32 textColor,
+                            ImU32 outlineColor,
+                            float thickness)
+    {
+        DrawTextWithOutline(GetWindowDrawList(), text, GetCursorScreenPos(), textColor, outlineColor, thickness);
+        ImVec2 textSize = CalcTextSize(text);
+        SetCursorPosY(GetCursorPosY() + textSize.y);
+    }
+
+    void TextRotated(const char* text, float angle_degrees)
+    {
+        if (!text || !*text) {
+            Dummy({0.f, 0.f});
+            return;
+        }
+        ImDrawList* dl = GetWindowDrawList();
+        const ImVec2 sz = CalcTextSize(text);
+        const float angle_rad = angle_degrees * IM_PI / 180.f;
+        const float abs_cos = fabsf(cosf(angle_rad));
+        const float abs_sin = fabsf(sinf(angle_rad));
+        const float rotated_w = sz.x * abs_cos + sz.y * abs_sin;
+        const float rotated_h = sz.x * abs_sin + sz.y * abs_cos;
+        const ImVec2 pos = GetCursorScreenPos();
+        const ImVec2 center = {pos.x + rotated_w * 0.5f, pos.y + rotated_h * 0.5f};
+        RenderTextRotated(dl, center, GetColorU32(ImGuiCol_Text), text, angle_rad);
+        Dummy({rotated_w, rotated_h});
+    }
+
+    bool BeginVerticalTabBar(const char* str_id, const char* const* labels, const int labels_count,
+                              int* active_tab, const int highlighted_tab, const float tab_width_hint)
+    {
+        const ImGuiStyle& style = GetStyle();
+        const float font_sz = GetFontSize();
+        const float tab_w   = tab_width_hint > 0.f ? tab_width_hint : font_sz + style.FramePadding.x * 4.f;
+
+        if (!BeginTable(str_id, 2, ImGuiTableFlags_BordersInnerV))
+            return false;
+
+        TableSetupColumn("##vtabs",    ImGuiTableColumnFlags_WidthFixed,   tab_w);
+        TableSetupColumn("##vcontent", ImGuiTableColumnFlags_WidthStretch);
+        TableNextRow();
+        TableSetColumnIndex(0);
+
+        ImDrawList* const dl = GetWindowDrawList();
+        PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.f, 0.f));
+
+        for (int i = 0; i < labels_count; i++) {
+            const char* label    = labels[i];
+            const bool  selected = (*active_tab == i);
+            const float text_w   = CalcTextSize(label).x;
+            const float btn_h    = text_w + style.FramePadding.y * 4.f;
+
+            PushID(i);
+            PushStyleColor(ImGuiCol_Button,
+                selected ? style.Colors[ImGuiCol_ButtonActive] : ImVec4(0.f, 0.f, 0.f, 0.f));
+            PushStyleColor(ImGuiCol_ButtonHovered,
+                selected ? style.Colors[ImGuiCol_ButtonActive] : style.Colors[ImGuiCol_ButtonHovered]);
+
+            const ImVec2 tl = GetCursorScreenPos();
+            if (ButtonEx("##vtab", {tab_w, btn_h}, ImGuiButtonFlags_None))
+                *active_tab = i;
+
+            PopStyleColor(2);
+
+            RenderTextRotated(dl, {tl.x + tab_w * 0.5f, tl.y + btn_h * 0.5f},
+                GetColorU32(selected ? ImGuiCol_Text : ImGuiCol_TextDisabled), label, IM_PI * 0.5f);
+
+            // Small dot on the right edge marks the currently-active mode tab
+            if (i == highlighted_tab) {
+                constexpr float r = 3.f;
+                dl->AddCircleFilled(
+                    {tl.x + tab_w - style.FramePadding.x - r, tl.y + btn_h * 0.5f},
+                    r, GetColorU32(ImGuiCol_CheckMark));
+            }
+
+            if (IsItemHovered())
+                SetTooltip("%s", label);
+
+            PopID();
+        }
+
+        PopStyleVar(); // ItemSpacing
+
+        TableSetColumnIndex(1);
+        return true;
+    }
+
+    void EndVerticalTabBar()
+    {
+        EndTable();
     }
 
 }

@@ -1,5 +1,9 @@
 #include "stdafx.h"
 
+#include <csignal>
+#include <cstdlib>
+#include <exception>
+
 #include <GWCA/Managers/UIMgr.h>
 
 #include <GWCA/Utilities/Hooker.h>
@@ -11,10 +15,42 @@
 #include <Modules/Updater.h>
 #include <GWToolbox.h>
 #include <Defines.h>
+#include <Defender.h>
+#include <Path.h>
 #include <Utils/TextUtils.h>
+#include <Utils/TextUtils_Time.h>
 
 namespace {
     char* tb_exception_message = nullptr;
+
+    // If Defender quarantined/blocked the crash file in the last few seconds, surface the event text.
+    std::wstring RecentDefenderBlock(const std::wstring& needle)
+    {
+        std::wstring detail;
+        if (FindRecentDefenderBlock(needle, 15, detail))
+            return L"\n\nWindows Defender reported a block moments ago:\n" + detail;
+        return L"";
+    }
+
+    // The assertion/exception that triggered the crash, so a screenshot shows the root cause even when no dump could be written.
+    std::wstring OriginalError(const char* extra_info)
+    {
+        const char* message = extra_info && *extra_info ? extra_info : tb_exception_message;
+        if (message && *message)
+            return L"\n\nOriginal error:\n" + TextUtils::StringToWString(message);
+        return L"";
+    }
+
+    // Resolve the crashes folder without asserting; Resources::GetPath() would assert and re-enter the crash handler when Documents is blocked.
+    std::wstring ResolveCrashFolder()
+    {
+        std::filesystem::path folder;
+        if (!PathGetDocumentsPath(folder, L"GWToolboxpp"))
+            return L"";
+        if (std::filesystem::path computer; PathGetComputerName(computer))
+            folder /= computer;
+        return (folder / L"crashes").wstring();
+    }
 
     struct GWDebugInfo {
         size_t len;
@@ -48,17 +84,25 @@ namespace {
 
         auto pContext = reinterpret_cast<PCONTEXT>(param_4);
 
-        // Create EXCEPTION_POINTERS structure
         EXCEPTION_RECORD exceptionRecord = {0};
         EXCEPTION_POINTERS exceptionPointers = {nullptr};
 
-        // Fill in exception record with info from CONTEXT
-        exceptionRecord.ExceptionCode = EXCEPTION_BREAKPOINT; // Or appropriate code
+        // GW has already written "Exception: <code>" into its own crash text; recover the real code from
+        // there, otherwise every dump is stamped EXCEPTION_BREAKPOINT and debuggers chase a phantom int3.
+        DWORD exception_code = EXCEPTION_BREAKPOINT;
+        if (message_buffer && message_buffer->buffer) {
+            unsigned int parsed = 0;
+            if (const auto exception_line = strstr(message_buffer->buffer, "Exception: ");
+                exception_line && sscanf(&exception_line[11], "%8x", &parsed) == 1 && parsed) {
+                exception_code = parsed;
+            }
+        }
+
+        exceptionRecord.ExceptionCode = exception_code;
         exceptionRecord.ExceptionFlags = EXCEPTION_NONCONTINUABLE;
         exceptionRecord.ExceptionAddress = reinterpret_cast<PVOID>(pContext->Eip);
         exceptionRecord.NumberParameters = 0;
 
-        // Set up exception pointers
         exceptionPointers.ExceptionRecord = &exceptionRecord;
         exceptionPointers.ContextRecord = pContext;
 
@@ -84,8 +128,108 @@ namespace {
         return 1;
     }
 
+    // The CRT kills the process for these without ever raising an SEH exception, so they never reach
+    // TopLevelExceptionFilter. Route them into Crash() with a context captured at the point of failure.
+    constexpr DWORD EXCEPTION_TOOLBOX_CRT_FAILURE = 0xE0435254;
+
+    _invalid_parameter_handler previous_invalid_parameter_handler = nullptr;
+    _purecall_handler previous_purecall_handler = nullptr;
+    std::terminate_handler previous_terminate_handler = nullptr;
+    void(__cdecl* previous_sigabrt_handler)(int) = SIG_DFL;
+    bool crt_handlers_installed = false;
+
+    void CrashFromCrtHandler(const char* message)
+    {
+        // Crash() keeps this pointer for the dump's comment stream, and the process dies before it could be reused.
+        static char crt_failure_message[512];
+        strncpy_s(crt_failure_message, message && *message ? message : "Unknown CRT failure", _TRUNCATE);
+
+        CONTEXT context{};
+        RtlCaptureContext(&context);
+
+        EXCEPTION_RECORD record{};
+        record.ExceptionCode = EXCEPTION_TOOLBOX_CRT_FAILURE;
+        record.ExceptionFlags = EXCEPTION_NONCONTINUABLE;
+        record.ExceptionAddress = reinterpret_cast<PVOID>(context.Eip);
+
+        EXCEPTION_POINTERS pointers{&record, &context};
+        CrashHandler::Crash(&pointers, crt_failure_message);
+
+        // Crash() doesn't return, but don't let the CRT carry on if it somehow did.
+        TerminateProcess(GetCurrentProcess(), 1);
+    }
+
+    // Release CRTs pass null for everything but the line number, hence the placeholders.
+    void __cdecl OnInvalidParameter(const wchar_t* expression, const wchar_t* function, const wchar_t* file, const unsigned int line, uintptr_t)
+    {
+        char message[512];
+        snprintf(message, _countof(message), "Invalid parameter: '%S' in '%S', '%S' line %u",
+                 expression ? expression : L"<no expression>",
+                 function ? function : L"<unknown function>",
+                 file ? file : L"<unknown file>",
+                 line);
+        CrashFromCrtHandler(message);
+    }
+
+    void __cdecl OnPureCall()
+    {
+        CrashFromCrtHandler("Pure virtual function call");
+    }
+
+    void OnTerminate()
+    {
+        char message[512];
+        const char* description = "std::terminate called";
+
+        if (std::current_exception()) {
+            try {
+                std::rethrow_exception(std::current_exception());
+            }
+            catch (const std::exception& e) {
+                snprintf(message, _countof(message), "Unhandled C++ exception: %s", e.what());
+                description = message;
+            }
+            catch (...) {
+                description = "Unhandled C++ exception (not derived from std::exception)";
+            }
+        }
+
+        CrashFromCrtHandler(description);
+    }
+
+    void __cdecl OnAbortSignal(int)
+    {
+        CrashFromCrtHandler("abort() called");
+    }
+
+    void InstallCrtHandlers()
+    {
+        if (crt_handlers_installed) return;
+        crt_handlers_installed = true;
+
+        previous_invalid_parameter_handler = _set_invalid_parameter_handler(OnInvalidParameter);
+        previous_purecall_handler = _set_purecall_handler(OnPureCall);
+        previous_terminate_handler = std::set_terminate(OnTerminate);
+        previous_sigabrt_handler = signal(SIGABRT, OnAbortSignal);
+        // Stop the CRT showing its own abort dialog or handing the fault to WER if our handler ever returns.
+        _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+    }
+
+    void RemoveCrtHandlers()
+    {
+        if (!crt_handlers_installed) return;
+        crt_handlers_installed = false;
+
+        // Leaving these pointing into an unloaded toolbox dll would be worse than no handler at all.
+        _set_invalid_parameter_handler(previous_invalid_parameter_handler);
+        _set_purecall_handler(previous_purecall_handler);
+        std::set_terminate(previous_terminate_handler);
+        signal(SIGABRT, previous_sigabrt_handler);
+    }
+
     void Cleanup()
     {
+        RemoveCrtHandlers();
         if (AppendStackTraceToCrashMessage_Func) {
             GW::Hook::RemoveHook(AppendStackTraceToCrashMessage_Func);
             AppendStackTraceToCrashMessage_Func = nullptr;
@@ -122,8 +266,7 @@ void CrashHandler::FatalAssert(const char* expr, const char* file, const unsigne
 
         throw std::runtime_error(tb_exception_message);
     } __except (EXCEPT_EXPRESSION_ENTRY) {
-        // The Crash() function should have terminated the process
-        // If we somehow get here, force termination
+        // Crash() should already have terminated the process; force it if not.
         TerminateProcess(GetCurrentProcess(), 1);
     }
 
@@ -133,9 +276,20 @@ void CrashHandler::FatalAssert(const char* expr, const char* file, const unsigne
 
 LONG WINAPI CrashHandler::Crash(EXCEPTION_POINTERS* pExceptionPointers, const char* extra_info)
 {
-#ifdef _DEBUG
-    __debugbreak();
-#endif
+    // A crash while handling a crash (e.g. resolving the blocked crash folder asserts again) must not recurse.
+    static volatile LONG crashing = 0;
+    if (InterlockedExchange(&crashing, 1) != 0) {
+        std::wstring error =
+            L"Guild Wars crashed, and GWToolbox crashed again while trying to write the crash dump.\n\n"
+            L"This almost always means something is blocking your Documents\\GWToolboxpp folder - "
+            L"usually Windows Defender Controlled Folder Access or antivirus.\n\n"
+            L"Allow Guild Wars through Controlled Folder Access, or add an exclusion for your "
+            L"GWToolbox folder, then try again.";
+        error += OriginalError(extra_info);
+        ShowTroubleshootingError(error, L"GWToolbox++ crash dump error", Troubleshooting::CrashDumps);
+        TerminateProcess(GetCurrentProcess(), 1);
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
 
     // Disable WER right at the start of crash handling
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
@@ -151,14 +305,14 @@ LONG WINAPI CrashHandler::Crash(EXCEPTION_POINTERS* pExceptionPointers, const ch
 
 
 #ifndef _DEBUG
-    if (!Updater::IsLatestVersion()) {
-        const std::wstring error_message = L"YOU ARE NOT USING THE LATEST VERSION OF GWTOOLBOX++!\n\n"
-            L"Please update to the latest version before reporting any issues.\n"
-            L"No crash dump will be created because the issue may have already been fixed.";
+    // if (!Updater::IsLatestVersion()) {
+    //     const std::wstring error_message = L"YOU ARE NOT USING THE LATEST VERSION OF GWTOOLBOX++!\n\n"
+    //         L"Please update to the latest version before reporting any issues.\n"
+    //         L"No crash dump will be created because the issue may have already been fixed.";
 
-        MessageBoxW(nullptr, error_message.c_str(), L"GWToolbox++ - Outdated Version", MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
-        TerminateProcess(GetCurrentProcess(), 1);
-    }
+    //     MessageBoxW(nullptr, error_message.c_str(), L"GWToolbox++ - Outdated Version", MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
+    //     TerminateProcess(GetCurrentProcess(), 1);
+    // }
     if (!PluginModule::GetPlugins().empty()) {
         const std::wstring error_message = L"YOU ARE USING PLUGINS!\n\n"
             L"Do not report issues that happen while you are using plugins.\n"
@@ -169,10 +323,24 @@ LONG WINAPI CrashHandler::Crash(EXCEPTION_POINTERS* pExceptionPointers, const ch
     }
 #endif
 
-    const std::wstring crash_folder = Resources::GetPath(L"crashes");
+    const std::wstring crash_folder = ResolveCrashFolder();
 
-    if (!Resources::EnsureFolderExists(crash_folder.c_str())) {
-        MessageBoxW(nullptr, L"Failed to create crash directory", L"GWToolbox++ crash dump error", MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
+    std::wstring ensure_folder_error;
+    if (crash_folder.empty()) {
+        std::wstring error =
+            L"Guild Wars crashed!\n\n"
+            L"GWToolbox couldn't find your Documents folder to write a crash dump.\n\n"
+            L"This is usually Windows Defender Controlled Folder Access or antivirus blocking access - "
+            L"allow Guild Wars through Controlled Folder Access, or add an exclusion for your GWToolbox folder.";
+        error += RecentDefenderBlock(L"GWToolbox");
+        error += OriginalError(extra_info);
+        ShowTroubleshootingError(error, L"GWToolbox++ crash dump error", Troubleshooting::CrashDumps, MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
+        TerminateProcess(GetCurrentProcess(), 1);
+    }
+    if (!Resources::EnsureFolderExists(crash_folder.c_str(), ensure_folder_error)) {
+        ensure_folder_error += RecentDefenderBlock(crash_folder);
+        ensure_folder_error += OriginalError(extra_info);
+        ShowTroubleshootingError(ensure_folder_error, L"GWToolbox++ crash dump error", Troubleshooting::CrashDumps, MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
         TerminateProcess(GetCurrentProcess(), 1);
     }
 
@@ -181,12 +349,11 @@ LONG WINAPI CrashHandler::Crash(EXCEPTION_POINTERS* pExceptionPointers, const ch
     const DWORD ProcessId = GetCurrentProcessId();
     const DWORD ThreadId = GetCurrentThreadId();
 
-    SYSTEMTIME stLocalTime;
-    GetLocalTime(&stLocalTime);
+    const auto stLocalTime = TextUtils::Time::GetCurrentSystemTime();
     wchar_t szFileName[MAX_PATH];
     const auto fn_print = swprintf(
-        szFileName, MAX_PATH, L"%s\\%S%S-%04d%02d%02d-%02d%02d%02d-%ld-%ld.dmp", crash_folder.c_str(), GWTOOLBOXDLL_VERSION, GWTOOLBOXDLL_VERSION_BETA, stLocalTime.wYear, stLocalTime.wMonth, stLocalTime.wDay, stLocalTime.wHour, stLocalTime.wMinute,
-        stLocalTime.wSecond, ProcessId, ThreadId
+        szFileName, MAX_PATH, L"%s\\%S%S-%04d%02d%02d-%02d%02d%02d-%ld-%ld.dmp", crash_folder.c_str(), GWTOOLBOXDLL_VERSION, GWTOOLBOXDLL_VERSION_BETA, stLocalTime.year, stLocalTime.month, stLocalTime.day, stLocalTime.hour, stLocalTime.minute,
+        stLocalTime.second, ProcessId, ThreadId
     );
 
     if (fn_print < 0) {
@@ -198,8 +365,18 @@ LONG WINAPI CrashHandler::Crash(EXCEPTION_POINTERS* pExceptionPointers, const ch
     const HANDLE hFile = CreateFileW(szFileName, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
 
     if (hFile == INVALID_HANDLE_VALUE) {
-        std::wstring error = std::format(L"Failed to create crash file\nGetLastError: {}", GetLastError());
-        MessageBoxW(nullptr, error.c_str(), L"GWToolbox++ crash dump error", MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
+        const DWORD last_error = GetLastError();
+        std::wstring error = std::format(
+            L"Guild Wars crashed!\n\n"
+            L"GWToolbox tried to create a crash file, but Windows refused to create it.\n\n"
+            L"GetLastError: {} ({})\n\n"
+            L"File: {}\n\n"
+            L"{}",
+            last_error, FormatWindowsError(last_error), szFileName, PathDiagnoseWritability(crash_folder)
+        );
+        error += RecentDefenderBlock(szFileName);
+        error += OriginalError(extra_info);
+        ShowTroubleshootingError(error, L"GWToolbox++ crash dump error", Troubleshooting::CrashDumps, MB_ICONERROR | MB_SYSTEMMODAL | MB_TOPMOST);
         TerminateProcess(GetCurrentProcess(), 1);
     }
 
@@ -231,16 +408,43 @@ LONG WINAPI CrashHandler::Crash(EXCEPTION_POINTERS* pExceptionPointers, const ch
     DWORD lastError = GetLastError();
     CloseHandle(hFile);
 
+    // Antivirus can let the write succeed then delete the file, so confirm it's really there and non-empty.
+    bool file_present = false;
+    {
+        const HANDLE hVerify = CreateFileW(szFileName, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hVerify != INVALID_HANDLE_VALUE) {
+            LARGE_INTEGER file_size{};
+            file_present = GetFileSizeEx(hVerify, &file_size) && file_size.QuadPart > 0;
+            CloseHandle(hVerify);
+        }
+    }
+
+    const bool dump_ok = success && file_present;
+
     std::wstring error_info;
 
-    if (!success) {
-        error_info = std::format(
-            L"Guild Wars crashed!\n\n"
-            L"GWToolbox tried to create a crash dump, but MiniDumpWriteDump failed\n\n"
-            L"GetLastError: {}\n\n"
-            L"File: {}\n\n",
-            lastError, szFileName
-        );
+    if (!dump_ok) {
+        if (!success) {
+            error_info = std::format(
+                L"Guild Wars crashed!\n\n"
+                L"GWToolbox tried to create a crash dump, but MiniDumpWriteDump failed.\n\n"
+                L"GetLastError: {} ({})\n\n"
+                L"File: {}\n\n"
+                L"{}",
+                lastError, FormatWindowsError(lastError), szFileName, PathDiagnoseWritability(crash_folder)
+            );
+        }
+        else {
+            error_info = std::format(
+                L"Guild Wars crashed!\n\n"
+                L"GWToolbox wrote a crash dump, but the file is now empty or gone.\n\n"
+                L"File: {}\n\n"
+                L"{}",
+                szFileName, PathDiagnoseWritability(crash_folder)
+            );
+        }
+        error_info += RecentDefenderBlock(szFileName);
+        error_info += OriginalError(extra_info);
     }
     else {
         error_info = L"Guild Wars crashed!\n\n";
@@ -265,16 +469,17 @@ LONG WINAPI CrashHandler::Crash(EXCEPTION_POINTERS* pExceptionPointers, const ch
     }
     delete ExpParam;
 
-    MessageBoxW(nullptr, error_info.c_str(), success ? L"GWToolbox++ crash dump created!" : L"GWToolbox++ crash dump failed!", MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_SETFOREGROUND | MB_TOPMOST);
+    ShowTroubleshootingError(error_info, dump_ok ? L"GWToolbox++ crash dump created!" : L"GWToolbox++ crash dump failed!", dump_ok ? nullptr : Troubleshooting::CrashDumps);
 
     #ifdef _DEBUG
+    if (IsDebuggerPresent()) {
+        __debugbreak();
+    }
     abort();
     #else
     TerminateProcess(GetCurrentProcess(), 1);
     return EXCEPTION_EXECUTE_HANDLER;
     #endif
-
-
 }
 
 void CrashHandler::Terminate()
@@ -306,6 +511,7 @@ void CrashHandler::Initialize()
     }
 
     SetUnhandledExceptionFilter(TopLevelExceptionFilter);
+    InstallCrtHandlers();
     GW::RegisterPanicHandler(GWCAPanicHandler, nullptr);
 
     AppendStackTraceToCrashMessage_Func = (AppendStackTraceToCrashMessage_pt)GW::Scanner::ToFunctionStart(GW::Scanner::FindUseOfString("%p  %08x %08x %08x %08x "), 0xfff);

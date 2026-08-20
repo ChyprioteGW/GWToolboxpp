@@ -2,67 +2,19 @@
 
 // ReSharper disable once CppUnusedIncludeDirective
 #include <ImGuiAddons.h>
-#include <nlohmann/json.hpp>
+#include <glaze/glaze.hpp>
 #include <ToolboxIni.h>
+#include <RectF.h>
 
-namespace GW::Constants {
-    enum class Language;
+// ReSharper disable once CppUnusedIncludeDirective
+#include <Utils/EncString.h>
+#include <Utils/TextUtils.h>
+
+namespace GW {
+    namespace SkillbarMgr {
+        struct SkillTemplate;
+    }
 }
-
-struct RectF {
-    ImVec2 top_left;
-    ImVec2 bottom_right;
-
-    constexpr RectF(const RECT& rect)
-        : top_left({static_cast<float>(rect.left), static_cast<float>(rect.top)}),
-          bottom_right({static_cast<float>(rect.right), static_cast<float>(rect.bottom)}) {}
-
-    constexpr RectF(const ImVec2& _top_left, const ImVec2& _bottom_right)
-        : top_left(_top_left), bottom_right(_bottom_right) {}
-
-    ImVec2 size() const
-    {
-        return {width(), height()};
-    }
-
-    float width() const
-    {
-        return bottom_right.x - top_left.x;
-    }
-
-    float height() const
-    {
-        return bottom_right.y - top_left.y;
-    }
-
-    void move_to(const ImVec2& new_top_left)
-    {
-        const auto diff_x = new_top_left.x - top_left.x;
-        const auto diff_y = new_top_left.y - top_left.y;
-        top_left.x += diff_x;
-        top_left.y += diff_y;
-        bottom_right.x += diff_x;
-        bottom_right.y += diff_y;
-    }
-
-    void resize(const ImVec2& new_size)
-    {
-        const auto old_size = size();
-        const auto diff_x = new_size.x - old_size.x;
-        const auto diff_y = new_size.y - old_size.y;
-        bottom_right.x += diff_x;
-        bottom_right.y += diff_y;
-    }
-
-    bool contains(const ImVec2& point) const
-    {
-        return point.x >= top_left.x && point.x <= bottom_right.x &&
-               point.y >= top_left.y && point.y <= bottom_right.y;
-    }
-
-    RectF() = default;
-};
-
 
 namespace GuiUtils {
     template <typename T>
@@ -82,30 +34,56 @@ namespace GuiUtils {
     void SearchWiki(const std::wstring& term);
     std::string SanitizeWikiUrl(std::string s);
 
-    float GetPartyHealthbarHeight();
     float GetGWScaleMultiplier(bool force = false);
 
     // Reposition a rect within its container to make sure it isn't overflowing it.
     ImVec4& ClampRect(ImVec4& rect, const ImVec4& viewport);
 
-    template <map_type T>
-    void MapToIni(ToolboxIni* ini, const char* section, const char* name, const T& map)
-    {
-        const auto map_json = nlohmann::json(map);
-        const auto map_str = map_json.dump();
-        ini->SetValue(section, name, map_str.c_str());
-    }
+    // Takes a wstring and translates into a string of hex values, separated by spaces.
+    // Lossless: handles all wchar_t values including lone Unicode surrogates present in GW encoded strings.
+    bool ArrayToIni(const std::wstring& in, std::string* out);
+    bool ArrayToIni(const uint32_t* in, size_t len, std::string* out);
+    size_t IniToArray(const std::string& in, std::wstring& out);
 
     template <map_type T>
     T IniToMap(ToolboxIni* ini, const char* section, const char* name)
     {
-        std::string map_str = ini->GetValue(section, name, "");
-        try {
-            const auto map_json = nlohmann::json::parse(map_str);
-            return map_json.get<T>();
-        } catch (nlohmann::json::exception e) {
+        const std::string map_str = ini->GetValue(section, name, "");
+        if (map_str.empty()) {
             return {};
         }
+
+        using key_type = typename T::key_type;
+        using staged_key = std::conditional_t<std::is_same_v<key_type, std::wstring>, std::string, key_type>;
+        using staged_map = std::map<staged_key, typename T::mapped_type>;
+
+        staged_map staged;
+        if (glz::read_json(staged, map_str)) {
+            staged.clear();
+            // TODO: delete this branch once pre-glaze configs are gone.
+            std::vector<std::tuple<staged_key, typename T::mapped_type>> legacy;
+            if (glz::read_json(legacy, map_str)) {
+                return {};
+            }
+            for (auto& [k, v] : legacy) {
+                staged.emplace(std::move(k), std::move(v));
+            }
+        }
+
+        T out;
+        for (auto& [k, v] : staged) {
+            if constexpr (std::is_same_v<key_type, std::wstring>) {
+                std::wstring wkey;
+                if (IniToArray(k, wkey) == 0) {
+                    // Backward compat: key was written in old UTF-8 format before hex encoding was introduced
+                    wkey = TextUtils::StringToWString(k);
+                }
+                out.emplace(std::move(wkey), std::move(v));
+            } else {
+                out.emplace(std::move(k), std::move(v));
+            }
+        }
+        return out;
     }
 
     template <map_type T>
@@ -116,11 +94,6 @@ namespace GuiUtils {
         }
         return IniToMap<T>(ini, section, name);
     }
-
-    // Takes a wstring and translates into a string of hex values, separated by spaces
-    bool ArrayToIni(const std::wstring& in, std::string* out);
-    bool ArrayToIni(const uint32_t* in, size_t len, std::string* out);
-    size_t IniToArray(const std::string& in, std::wstring& out);
     void BitsetToIni(const std::bitset<256>& key_combo, std::string& out_str);
     void IniToBitset(const std::string& str, std::bitset<256>& key_combo);
     // Convert token separated cstring into array of strings
@@ -137,64 +110,13 @@ namespace GuiUtils {
     void FlashWindow(bool force = false);
     void FocusWindow();
 
-    // Same as std::format, but use printf formatting
-    std::string format(const char* msg, ...);
-    // Same as std::format, but use printf formatting
-    std::wstring format(const wchar_t* msg, ...);
-
-    class EncString {
-    protected:
-        std::wstring encoded_ws;
-        std::wstring decoded_ws;
-        std::string decoded_s;
-        bool decoding = false;
-        bool decoded = false;
-        bool sanitised = false;
-        bool release = false;
-        virtual void sanitise();
-        virtual void decode();
-        GW::Constants::Language language_id = static_cast<GW::Constants::Language>(0xff);
-        static void OnStringDecoded(void* param, const wchar_t* decoded);
-
-    public:
-        // Set the language for decoding this encoded string. If the language has changed, resets the decoded result. Returns this for chaining.
-        EncString* language(GW::Constants::Language l);
-        bool IsDecoding() const { return decoding && decoded_ws.empty(); };
-        // Recycle this EncString by passing a new encoded string id to decode.
-        // Set sanitise to true to automatically remove guild tags etc from the string
-        EncString* reset(uint32_t _enc_string_id = 0, bool sanitise = true);
-        // Recycle this EncString by passing a new string to decode.
-        // Set sanitise to true to automatically remove guild tags etc from the string
-        EncString* reset(const wchar_t* _enc_string = nullptr, bool sanitise = true);
-        std::wstring& wstring();
-        std::string& string();
-
-        // Free memory used by this EncString. 
-        void Release();
-
-        [[nodiscard]] const std::wstring& encoded() const
-        {
-            return encoded_ws;
-        };
-
-        EncString(const wchar_t* _enc_string = nullptr, const bool sanitise = true)
-        {
-            reset(_enc_string, sanitise);
-        }
-
-        EncString(const uint32_t _enc_string, const bool sanitise = true)
-        {
-            reset(_enc_string, sanitise);
-        }
-
-        // Disable object copying; decoded_ws is passed to GW by reference and would be bad to do this. Pass by pointer instead.
-        EncString(const EncString& temp_obj) = delete;
-        EncString& operator=(const EncString& temp_obj) = delete;
-        ~EncString();
-    };
-
-    // Create an ImGui representation of the skill bar
     void DrawSkillbar(const char* build_code, bool show_attributes = true);
 
+    void DrawSkillbar(const GW::SkillbarMgr::SkillTemplate* skill_template_pt, bool show_attributes = true);
+
     int DecimalPlaces(float value, int max_places = 4);
+
+    enum class GwButtonIcon { Save, LoadFromTemplate, SaveToTemplate, ManageTemplates, TemplateCode, ChatIcon };
+    bool IconButton(const char* label, GwButtonIcon icon, const ImVec2& size = ImVec2(0, 0), const ImGuiButtonFlags flags = ImGuiButtonFlags_None);
+    bool IconButtonConfirm(const char* label, GwButtonIcon icon, const ImVec2& size = ImVec2(0, 0), const ImGuiButtonFlags flags = ImGuiButtonFlags_None);
 };

@@ -10,15 +10,77 @@
 #include <Defines.h>
 #include <Keys.h>
 #include <Utils/TextUtils.h>
+#include <GWCA/Utilities/Hooker.h>
+#include <GWCA/Utilities/Scanner.h>
 
 namespace {
     const float default_cam_speed = 1000.f;            // 600 units per sec
     const float rotation_speed = DirectX::XM_PI / 3.f; // 6 seconds for full rotation
 
-    bool forward_fix_z = true;
-    float cam_speed = default_cam_speed;
+    const float default_max_distance = 900.f;
+
+    CameraUnlockModule::Settings settings;
 
     GW::HookEntry ChatCmdHookEntry;
+    std::vector<GW::Camera*> last_camera_by_mode(10);
+
+    typedef void(__cdecl* OnSetCameraMode_pt)(uint32_t camera_mode, bool enabled);
+    OnSetCameraMode_pt OnSetCameraMode_Func = nullptr, OnSetCameraMode_Ret = nullptr;
+
+    void OnSetCameraMode(uint32_t camera_mode, bool enabled) {
+        GW::Hook::EnterHook();
+        const auto cam = GW::CameraMgr::GetCamera();
+        if (!cam) {
+            OnSetCameraMode_Ret(camera_mode, enabled);
+            return GW::Hook::LeaveHook();
+        }
+        uint32_t old_mode = cam->camera_mode;
+        if (cam->h00D8 && cam->camera_mode != camera_mode) {
+            auto cpy = new GW::Camera();
+            memcpy(cpy, cam, sizeof(*cam));
+            if (last_camera_by_mode[cam->camera_mode]) {
+                delete last_camera_by_mode[cam->camera_mode];
+            }
+            last_camera_by_mode[cam->camera_mode] = cpy;
+            
+        }
+        OnSetCameraMode_Ret(camera_mode, enabled);
+        if (cam->camera_mode != old_mode && last_camera_by_mode[cam->camera_mode] && cam->camera_mode == 0) {
+            // TODO: How to set the camera position to what it was before we died?
+
+            // We can't just do it here because there is further logic in the chain that resets the camera position now that we're alive
+
+        }
+        GW::Hook::LeaveHook();
+    }
+
+    // Vanilla GW freeze fix: resurrecting after a first-person death can leave pitch/pitch_to_go NaN, which
+    // reaches the eye position and hangs the terrain ray-march (Gw.exe @0x0070eb40, ordered float compare only).
+    // Hook the per-frame get-camera-eye (Gw.exe @0x004f7b80) and clamp pitch back into [-1,1] (NaN -> 0).
+    typedef void(__fastcall* GetCameraEye_pt)(void* cam, void* edx, uint32_t flag, void* out_pos, void* out_look, void* out_fov);
+    GetCameraEye_pt GetCameraEye_Func = nullptr, GetCameraEye_Ret = nullptr;
+
+    float SanitizePitch(const float pitch) {
+        if (pitch != pitch) return 0.f; // NaN
+        return std::clamp(pitch, -1.f, 1.f);
+    }
+
+    void __fastcall OnGetCameraEye(void* cam_ptr, void* edx, uint32_t flag, void* out_pos, void* out_look, void* out_fov) {
+        GW::Hook::EnterHook();
+        const auto cam = GW::CameraMgr::GetCamera();
+        if (cam) {
+            cam->pitch = SanitizePitch(cam->pitch);
+            cam->pitch_to_go = SanitizePitch(cam->pitch_to_go);
+            // If an earlier frame already produced a NaN eye position, fall back to the
+            // focus point for this frame so the ray-march gets a finite coordinate.
+            const auto& p = cam->position;
+            if (p.x != p.x || p.y != p.y || p.z != p.z) {
+                cam->position = cam->look_at_target;
+            }
+        }
+        GetCameraEye_Ret(cam_ptr, edx, flag, out_pos, out_look, out_fov);
+        GW::Hook::LeaveHook();
+    }
 
     bool ForwardMovement(float amount, bool true_forward)
     {
@@ -52,6 +114,8 @@ namespace {
         return true;
     }
 
+
+
     bool RotateMovement(float angle)
     {
         if (angle == 0.f) return false;
@@ -74,47 +138,64 @@ namespace {
     }
     void CHAT_CMD_FUNC(CmdCamera)
     {
-        if (argc == 1) {
+        std::wstring arg1;
+        if (argc < 2)
+            goto print_warning;
+        arg1 = TextUtils::ToLower(argv[1]);
+        if (arg1 == L"lock") {
             GW::CameraMgr::UnlockCam(false);
+            return;
         }
-        else {
-            const std::wstring arg1 = TextUtils::ToLower(argv[1]);
-            if (arg1 == L"lock") {
-                GW::CameraMgr::UnlockCam(false);
-            }
-            else if (arg1 == L"unlock") {
-                GW::CameraMgr::UnlockCam(true);
-                Log::Flash("Use Q/E, A/D, W/S, X/Z, R and arrows for camera movement");
-            }
-            else if (arg1 == L"fog") {
-                if (argc == 3) {
-                    const std::wstring arg2 = TextUtils::ToLower(argv[2]);
-                    if (arg2 == L"on") {
-                        GW::CameraMgr::SetFog(true);
-                    }
-                    else if (arg2 == L"off") {
-                        GW::CameraMgr::SetFog(false);
-                    }
+        if (arg1 == L"unlock") {
+            GW::CameraMgr::UnlockCam(true);
+            Log::Flash("Use Q/E, A/D, W/S, X/Z, R and arrows for camera movement");
+            return;
+        }
+        if (arg1 == L"fog") {
+            if (argc == 3) {
+                const std::wstring arg2 = TextUtils::ToLower(argv[2]);
+                if (arg2 == L"on") {
+                    GW::CameraMgr::SetFog(true);
+                    return;
+                }
+                else if (arg2 == L"off") {
+                    GW::CameraMgr::SetFog(false);
+                    return;
                 }
             }
-            else if (arg1 == L"speed") {
-                if (argc > 2) {
-                    const std::wstring arg2 = TextUtils::ToLower(argv[2]);
-                    if (arg2 == L"default") {
-                        cam_speed = default_cam_speed;
-                    }
-                    float speed = 0.0f;
-                    if (TextUtils::ParseFloat(arg2.c_str(), &speed)) {
-                        cam_speed = speed;
-                    }
-                }
-                Log::Flash("Camera speed is now %f", cam_speed);
-            }
-            else {
-                Log::Error("Invalid argument.");
-            }
-            
+            goto print_warning;
         }
+        if (arg1 == L"speed") {
+            if (argc > 2) {
+                const std::wstring arg2 = TextUtils::ToLower(argv[2]);
+                float speed = 0.0f;
+                if (arg2 == L"default") {
+                    speed = default_cam_speed;
+                }
+                else if (!TextUtils::ParseFloat(TextUtils::ToLower(argv[2]).c_str(), &speed)) {
+                    goto print_warning;
+                }
+                settings.cam_speed = speed;
+            }
+            return Log::Flash("Camera speed is now %f", settings.cam_speed);
+        }
+        else if (arg1 == L"distance") {
+            if (argc > 2) {
+                float dist = 900.f;
+                const std::wstring arg2 = TextUtils::ToLower(argv[2]);
+                if (arg2 == L"default") {
+                    dist = default_max_distance;
+                }
+                else if (!TextUtils::ParseFloat(TextUtils::ToLower(argv[2]).c_str(), &dist)) {
+                    goto print_warning;
+                }
+                GW::CameraMgr::SetMaxDist(dist);
+                settings.cam_max_distance = dist;
+            }
+            return Log::Flash("Camera distance is now %f", settings.cam_max_distance);
+        }
+    print_warning:
+        Log::Warning(CameraUnlockModule::camera_syntax);
     }
 }
 
@@ -123,34 +204,65 @@ void CameraUnlockModule::Terminate()
     ToolboxModule::Terminate();
     GW::Chat::DeleteCommand(&ChatCmdHookEntry);
     GW::CameraMgr::UnlockCam(false);
+    if (OnSetCameraMode_Func) {
+        GW::Hook::RemoveHook(OnSetCameraMode_Func);
+    }
+    if (GetCameraEye_Func) {
+        GW::Hook::RemoveHook(GetCameraEye_Func);
+    }
 }
+
 void CameraUnlockModule::Initialize()
 {
     ToolboxModule::Initialize();
+    SettingsRegistry::Register(this, settings);
     GW::Chat::CreateCommand(&ChatCmdHookEntry, L"cam", CmdCamera);
     GW::Chat::CreateCommand(&ChatCmdHookEntry, L"camera", CmdCamera);
+
+    OnSetCameraMode_Func = (OnSetCameraMode_pt)GW::Scanner::ToFunctionStart(GW::Scanner::FindNthUseOfString("mode < arrsize(s_mode)", 1));
+    if (OnSetCameraMode_Func) {
+        GW::Hook::CreateHook((void**)&OnSetCameraMode_Func, OnSetCameraMode, (void**)&OnSetCameraMode_Ret);
+        GW::Hook::EnableHooks(OnSetCameraMode_Func);
+    }
+    DEBUG_ASSERT(OnSetCameraMode_Func);
+
+    GetCameraEye_Func = (GetCameraEye_pt)GW::Scanner::ToFunctionStart(GW::Scanner::FindNthUseOfString("*fov != 0.0f", 0));
+    if (GetCameraEye_Func) {
+        GW::Hook::CreateHook((void**)&GetCameraEye_Func, OnGetCameraEye, (void**)&GetCameraEye_Ret);
+        GW::Hook::EnableHooks(GetCameraEye_Func);
+    }
+    DEBUG_ASSERT(GetCameraEye_Func);
+}
+void CameraUnlockModule::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy) {
+    ToolboxModule::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
+    // Pre-2026 builds persisted these under [Chat Commands]; any newer value wins
+    if (legacy && !doc.HasSection(Name()) && !legacy->SectionExists(Name())) {
+        settings.cam_speed = static_cast<float>(legacy->GetDoubleValue("Chat Commands", "cam_speed", settings.cam_speed));
+        settings.forward_fix_z = legacy->GetBoolValue("Chat Commands", "forward_fix_z", settings.forward_fix_z);
+    }
+    settings.cam_max_distance = std::clamp(settings.cam_max_distance, 25.f, 5000.f);
+    GW::CameraMgr::SetMaxDist(settings.cam_max_distance);
 }
 
-void CameraUnlockModule::LoadSettings(ToolboxIni* ini) {
-    ToolboxModule::LoadSettings(ini);
-    LOAD_BOOL(forward_fix_z);
-    LOAD_FLOAT(cam_speed);
-}
-
-void CameraUnlockModule::SaveSettings(ToolboxIni* ini)
+void CameraUnlockModule::SaveSettings(SettingsDoc& doc)
 {
-    ToolboxModule::SaveSettings(ini);
-    SAVE_BOOL(forward_fix_z);
-    SAVE_FLOAT(cam_speed);
+    ToolboxModule::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 }
+
 void CameraUnlockModule::DrawSettingsInternal()
 {
     ToolboxModule::DrawSettingsInternal();
     ImGui::Text("'/cam unlock' options");
     ImGui::Indent();
-    ImGui::Checkbox("Fix height when moving forward", &forward_fix_z);
-    ImGui::InputFloat("Camera speed", &cam_speed);
+    ImGui::Checkbox("Fix height when moving forward", &settings.forward_fix_z);
+    ImGui::InputFloat("Camera speed", &settings.cam_speed);
     ImGui::Unindent();
+    if (ImGui::InputFloat("Camera max distance", &settings.cam_max_distance, 100.f, 100.f, "%.f")) {
+        settings.cam_max_distance = std::clamp(settings.cam_max_distance, 25.f, 5000.f);
+        GW::CameraMgr::SetMaxDist(settings.cam_max_distance);
+    }
 }
 
 bool CameraUnlockModule::WndProc(const UINT Message, const WPARAM wParam, const LPARAM) {
@@ -194,7 +306,8 @@ void CameraUnlockModule::Update(float delta) {
     if (delta == 0.f) {
         return;
     }
-    if (GW::CameraMgr::GetCameraUnlock() && !GW::Chat::GetIsTyping() && !ImGui::GetIO().WantTextInput) {
+    // Update runs on the game thread, which outlives the ImGui context; no context means no text input
+    if (GW::CameraMgr::GetCameraUnlock() && !GW::Chat::GetIsTyping() && !(ImGui::GetCurrentContext() && ImGui::GetIO().WantTextInput)) {
         static bool keep_forward;
 
         float forward = 0;
@@ -238,10 +351,10 @@ void CameraUnlockModule::Update(float delta) {
             rotate = 0.f;
         }
 
-        ForwardMovement(forward * delta * cam_speed, !forward_fix_z);
-        VerticalMovement(vertical * delta * cam_speed);
+        ForwardMovement(forward * delta * settings.cam_speed, !settings.forward_fix_z);
+        VerticalMovement(vertical * delta * settings.cam_speed);
         RotateMovement(rotate * delta * rotation_speed);
-        SideMovement(side * delta * cam_speed);
+        SideMovement(side * delta * settings.cam_speed);
         GW::CameraMgr::UpdateCameraPos();
     }
 }

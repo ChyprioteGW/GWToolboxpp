@@ -1,48 +1,55 @@
 #include "stdafx.h"
 
 #include <GWCA/Context/CharContext.h>
-#include <GWCA/Context/WorldContext.h>
 #include <GWCA/Context/PartyContext.h>
+#include <GWCA/Context/WorldContext.h>
 
 #include <GWCA/GameEntities/Agent.h>
-#include <GWCA/GameEntities/Party.h>
-#include <GWCA/GameEntities/Player.h>
-#include <GWCA/GameEntities/Hero.h>
-#include <GWCA/GameEntities/Skill.h>
+#include <GWCA/GameEntities/Attribute.h>
 #include <GWCA/GameEntities/Friendslist.h>
+#include <GWCA/GameEntities/Hero.h>
 #include <GWCA/GameEntities/Item.h>
 #include <GWCA/GameEntities/Map.h>
-#include <GWCA/GameEntities/Attribute.h>
+#include <GWCA/GameEntities/Party.h>
+#include <GWCA/GameEntities/Player.h>
+#include <GWCA/GameEntities/Skill.h>
 
-#include <GWCA/Managers/PlayerMgr.h>
-#include <GWCA/Managers/PartyMgr.h>
 #include <GWCA/Managers/AgentMgr.h>
+#include <GWCA/Managers/EffectMgr.h>
 #include <GWCA/Managers/MapMgr.h>
-#include <GWCA/Managers/SkillbarMgr.h>
 #include <GWCA/Managers/MemoryMgr.h>
+#include <GWCA/Managers/PartyMgr.h>
+#include <GWCA/Managers/PlayerMgr.h>
+#include <GWCA/Managers/SkillbarMgr.h>
 
 #include <GWCA/Packets/Opcodes.h>
 #include <GWCA/Packets/StoC.h>
 
 #include <GWCA/Managers/FriendListMgr.h>
 
-#include "ToolboxUtils.h"
-#include <GWCA/Utilities/Scanner.h>
-#include <Utils/TextUtils.h>
+#include <Constants/EncStrings.h>
 #include <GWCA/Context/MapContext.h>
-#include <GWCA/Managers/UIMgr.h>
-#include <GWCA/Managers/GameThreadMgr.h>
-#include <Timer.h>
 #include <GWCA/GameEntities/Frame.h>
-#include <Modules/Resources.h>
-#include <Utils/GuiUtils.h>
+#include <GWCA/Managers/GameThreadMgr.h>
 #include <GWCA/Managers/ItemMgr.h>
+#include <GWCA/Managers/UIMgr.h>
+#include <GWCA/Utilities/Scanner.h>
+
+#include <Defines.h>
+#include <Modules/Resources.h>
+#include <Timer.h>
+#include <Utils/GuiUtils.h>
+#include <Utils/TextUtils.h>
+#include "ToolboxUtils.h"
 
 namespace {
 
     GUID* account_uuid = 0;
 
     GW::Array<GW::AvailableCharacterInfo>* available_chars_ptr = nullptr;
+
+    constexpr uint32_t bogus_area_info_flags = 0x5000000; // e.g. "wrong" Augury Rock is map 119, no NPCs.
+    constexpr uint32_t debug_area_info_flag = 0x80000000;
 
     bool IsInfused(const GW::Item* item)
     {
@@ -53,105 +60,117 @@ namespace {
     {
         return GW::UI::GetFrameByLabel(L"Selector");
     }
+    struct CharSelectorChar {
+        uint32_t h0000;
+        uint32_t h0004;
+        uint32_t h0008;
+        uint32_t h000C;
+        uint32_t h0010;
+        uint32_t h0014;
+        uint32_t h0018;
+        uint32_t h001C;
+        wchar_t name[0x14];
+        // ...
+    };
+    struct CharSelectorContext {
+        uint32_t vtable;
+        uint32_t frame_id;
+        GW::Array<CharSelectorChar*> chars;
+        // ...
+    };
 
-}
+} // namespace
 
 namespace GW {
 
     namespace Map {
+        bool HasMapDisplayInfo(const GW::AreaInfo* map_info)
+        {
+            return map_info && map_info->thumbnail_id && map_info->name_id && (map_info->x || map_info->y);
+        }
+
+        bool IsExcludedMapInfo(const GW::AreaInfo* map_info)
+        {
+            return map_info && ((map_info->flags & bogus_area_info_flags) == bogus_area_info_flags || (map_info->flags & debug_area_info_flag) != 0);
+        }
+
         bool GetMapWorldMapBounds(GW::AreaInfo* map, ImRect* out)
         {
             if (!map) return false;
             auto bounds = &map->icon_start_x;
-            if (*bounds == 0)
-                bounds = &map->icon_start_x_dupe;
+            if (*bounds == 0) bounds = &map->icon_start_x_dupe;
 
             // NB: Even though area info holds map bounds as uints, the world map uses signed floats anyway - a cast should be fine here.
-            *out = {
-                {static_cast<float>(bounds[0]), static_cast<float>(bounds[1])},
-                {static_cast<float>(bounds[2]), static_cast<float>(bounds[3])}
-            };
+            *out = {{static_cast<float>(bounds[0]), static_cast<float>(bounds[1])}, {static_cast<float>(bounds[2]), static_cast<float>(bounds[3])}};
             return true;
         }
 
-        std::vector<GW::Constants::TitleID> GetBountyTitlesForMap(GW::Constants::MapID map_id)
+        std::vector<GW::Constants::TitleID> GetTitlesForMap(GW::Constants::MapID map_id)
         {
             using namespace GW::Constants;
 
             switch (map_id) {
-                // Maps that award BOTH Sunspear and Lightbringer
-                case MapID::Arkjok_Ward:
-                case MapID::Bahdok_Caverns:
-                case MapID::Barbarous_Shore:
-                case MapID::Dejarin_Estate:
-                case MapID::The_Floodplain_of_Mahnkelon:
-                case MapID::Turais_Procession:
-                case MapID::Forum_Highlands:
-                case MapID::Garden_of_Seborhin:
-                case MapID::Resplendent_Makuun:
-                case MapID::The_Mirror_of_Lyss:
-                case MapID::Vehtendi_Valley:
-                case MapID::Wilderness_of_Bahdza:
-                case MapID::Yatendi_Canyons:
-                    return {TitleID::Sunspear, TitleID::Lightbringer};
-
-                // Sunspear only
-                case MapID::Gandara_the_Moon_Fortress:
-                case MapID::Jahai_Bluffs:
-                case MapID::Marga_Coast:
-                case MapID::Sunward_Marches:
-                case MapID::Holdings_of_Chokhin:
-                case MapID::The_Hidden_City_of_Ahdashim:
-                case MapID::Vehjin_Mines:
-                case MapID::Crystal_Overlook:
-                case MapID::Jokos_Domain:
-                case MapID::Poisoned_Outcrops:
-                case MapID::The_Alkali_Pan:
-                case MapID::The_Ruptured_Heart:
-                case MapID::The_Shattered_Ravines:
-                case MapID::The_Sulfurous_Wastes:
-                    return {TitleID::Sunspear};
-
-                // Lightbringer only (Realm of Torment)
-                case MapID::Domain_of_Anguish:
-                case MapID::Nightfallen_Garden:
-                case MapID::Domain_of_Fear:
-                case MapID::Domain_of_Pain:
-                case MapID::Domain_of_Secrets:
-                case MapID::Nightfallen_Coast:
-                case MapID::Nightfallen_Jahai:
-                case MapID::The_Shadow_Nexus:
-                    return {TitleID::Lightbringer};
                 case MapID::The_Deep:
                     return {TitleID::Luxon};
                 case MapID::Urgozs_Warren:
                     return {TitleID::Kurzick};
+                // Deldrimor: DepthsOfTyria missions/dungeons
+                case MapID::A_Time_for_Heroes:
+                case MapID::Central_Transfer_Chamber_outpost:
+                case MapID::Destructions_Depths_Level_1:
+                case MapID::Destructions_Depths_Level_2:
+                case MapID::Destructions_Depths_Level_3:
+                case MapID::Ravens_Point_Level_1:
+                case MapID::Ravens_Point_Level_2:
+                case MapID::Ravens_Point_Level_3:
+                case MapID::Glints_Challenge_mission: // CrystalDesert
+                // Deldrimor: EotN missions with Destroyers (would otherwise show Norn/Asuran by region)
+                case MapID::A_Gate_Too_Far_Level_1:
+                case MapID::A_Gate_Too_Far_Level_2:
+                case MapID::A_Gate_Too_Far_Level_3:
+                case MapID::A_Gate_Too_Far_mission:
+                case MapID::The_Elusive_Golemancer_Level_1:
+                case MapID::The_Elusive_Golemancer_Level_2:
+                case MapID::The_Elusive_Golemancer_Level_3:
+                case MapID::The_Elusive_Golemancer_mission:
+                case MapID::Genius_Operated_Living_Enchanted_Manifestation_mission:
+                    return {TitleID::Deldrimor};
+                // Lightbringer: Grand Court of Sebelkeh mission has Margonites (would otherwise show Sunspear by continent)
+                case MapID::Grand_Court_of_Sebelkeh:
+                    return {TitleID::Lightbringer};
+                // Vanguard: DepthsOfTyria dungeons in Charr territory
+                case MapID::Cathedral_of_Flames_Level_1:
+                case MapID::Cathedral_of_Flames_Level_2:
+                case MapID::Cathedral_of_Flames_Level_3:
+                case MapID::Rragars_Menagerie_Level_1:
+                case MapID::Rragars_Menagerie_Level_2:
+                case MapID::Rragars_Menagerie_Level_3:
+                    return {TitleID::Vanguard};
+                    // @todo: Bear Club for Women/Men (Norn)
             }
 
-            // Fallback to region-based logic
             const auto map_info = GW::Map::GetMapInfo(map_id);
             if (!map_info) return {};
 
             switch (map_info->region) {
-                case GW::Region::Region_Vaabi:
-                case GW::Region::Region_Istan:
-                    return {TitleID::Sunspear};
-                case GW::Region::Region_Desolation:
-                    return {TitleID::Lightbringer};
-                case GW::Region::Region_CharrHomelands:
-                    return {TitleID::Vanguard};
                 case GW::Region::Region_TarnishedCoast:
                     return {TitleID::Asuran};
                 case GW::Region::Region_FarShiverpeaks:
                     return {TitleID::Norn};
-                case GW::Region::Region_DepthsOfTyria:
-                    return {TitleID::Deldrimor};
+                case GW::Region::Region_Ascalon:
+                case GW::Region::Region_CharrHomelands:
+                    return {TitleID::Vanguard};
+                case GW::Region::Region_DomainOfAnguish:
+                case GW::Region::Region_Desolation:
+                    return {TitleID::Lightbringer};
                 case GW::Region::Region_Kurzick:
                 case GW::Region::Region_Luxon:
                     return {TitleID::Kurzick, TitleID::Luxon};
             }
 
             switch (map_info->continent) {
+                case GW::Continent::Elona:
+                    return {TitleID::Sunspear};
                 case GW::Continent::RealmOfTorment:
                     return {TitleID::Lightbringer};
             }
@@ -159,138 +178,10 @@ namespace GW {
             return {};
         }
 
-        GW::Constants::TitleID GetTitleForMap(GW::Constants::MapID map_id) {
-            switch (map_id) {
-                case GW::Constants::MapID::Alcazia_Tangle:
-                case GW::Constants::MapID::Arbor_Bay:
-                case GW::Constants::MapID::Gadds_Encampment_outpost:
-                case GW::Constants::MapID::Magus_Stones:
-                case GW::Constants::MapID::Rata_Sum_outpost:
-                case GW::Constants::MapID::Riven_Earth:
-                case GW::Constants::MapID::Sparkfly_Swamp:
-                case GW::Constants::MapID::Tarnished_Haven_outpost:
-                case GW::Constants::MapID::Umbral_Grotto_outpost:
-                case GW::Constants::MapID::Verdant_Cascades:
-                case GW::Constants::MapID::Vloxs_Falls:
-                case GW::Constants::MapID::Finding_the_Bloodstone_Level_1:
-                case GW::Constants::MapID::Finding_the_Bloodstone_Level_2:
-                case GW::Constants::MapID::Finding_the_Bloodstone_Level_3:
-                case GW::Constants::MapID::The_Elusive_Golemancer_Level_1:
-                case GW::Constants::MapID::The_Elusive_Golemancer_Level_2:
-                case GW::Constants::MapID::The_Elusive_Golemancer_Level_3:
-                    return GW::Constants::TitleID::Asuran;
-                case GW::Constants::MapID::A_Gate_Too_Far_Level_1:
-                case GW::Constants::MapID::A_Gate_Too_Far_Level_2:
-                case GW::Constants::MapID::A_Gate_Too_Far_Level_3:
-                case GW::Constants::MapID::A_Time_for_Heroes:
-                case GW::Constants::MapID::Central_Transfer_Chamber_outpost:
-                case GW::Constants::MapID::Destructions_Depths_Level_1:
-                case GW::Constants::MapID::Destructions_Depths_Level_2:
-                case GW::Constants::MapID::Destructions_Depths_Level_3:
-                case GW::Constants::MapID::Genius_Operated_Living_Enchanted_Manifestation:
-                case GW::Constants::MapID::Glints_Challenge_mission:
-                case GW::Constants::MapID::Ravens_Point_Level_1:
-                case GW::Constants::MapID::Ravens_Point_Level_2:
-                case GW::Constants::MapID::Ravens_Point_Level_3:
-                    return GW::Constants::TitleID::Deldrimor;
-                case GW::Constants::MapID::Attack_of_the_Nornbear:
-                case GW::Constants::MapID::Bjora_Marches:
-                case GW::Constants::MapID::Blood_Washes_Blood:
-                case GW::Constants::MapID::Boreal_Station_outpost:
-                case GW::Constants::MapID::Cold_as_Ice:
-                case GW::Constants::MapID::Curse_of_the_Nornbear:
-                case GW::Constants::MapID::Drakkar_Lake:
-                case GW::Constants::MapID::Eye_of_the_North_outpost:
-                case GW::Constants::MapID::Gunnars_Hold_outpost:
-                case GW::Constants::MapID::Ice_Cliff_Chasms:
-                case GW::Constants::MapID::Jaga_Moraine:
-                case GW::Constants::MapID::Mano_a_Norn_o:
-                case GW::Constants::MapID::Norrhart_Domains:
-                case GW::Constants::MapID::Olafstead_outpost:
-                case GW::Constants::MapID::Service_In_Defense_of_the_Eye:
-                case GW::Constants::MapID::Sifhalla_outpost:
-                case GW::Constants::MapID::The_Norn_Fighting_Tournament:
-                case GW::Constants::MapID::Varajar_Fells:
-                    // @todo: case MapID for Bear Club for Women/Men
-                    return GW::Constants::TitleID::Norn;
-                case GW::Constants::MapID::Against_the_Charr:
-                case GW::Constants::MapID::Ascalon_City_outpost:
-                case GW::Constants::MapID::Assault_on_the_Stronghold:
-                case GW::Constants::MapID::Cathedral_of_Flames_Level_1:
-                case GW::Constants::MapID::Cathedral_of_Flames_Level_2:
-                case GW::Constants::MapID::Cathedral_of_Flames_Level_3:
-                case GW::Constants::MapID::Dalada_Uplands:
-                case GW::Constants::MapID::Diessa_Lowlands:
-                case GW::Constants::MapID::Doomlore_Shrine_outpost:
-                case GW::Constants::MapID::Dragons_Gullet:
-                case GW::Constants::MapID::Eastern_Frontier:
-                case GW::Constants::MapID::Flame_Temple_Corridor:
-                case GW::Constants::MapID::Fort_Ranik:
-                case GW::Constants::MapID::Frontier_Gate_outpost:
-                case GW::Constants::MapID::Grendich_Courthouse_outpost:
-                case GW::Constants::MapID::Grothmar_Wardowns:
-                case GW::Constants::MapID::Longeyes_Ledge_outpost:
-                case GW::Constants::MapID::Nolani_Academy:
-                case GW::Constants::MapID::Old_Ascalon:
-                case GW::Constants::MapID::Piken_Square_outpost:
-                case GW::Constants::MapID::Regent_Valley:
-                case GW::Constants::MapID::Rragars_Menagerie_Level_1:
-                case GW::Constants::MapID::Rragars_Menagerie_Level_2:
-                case GW::Constants::MapID::Rragars_Menagerie_Level_3:
-                case GW::Constants::MapID::Ruins_of_Surmia:
-                case GW::Constants::MapID::Sacnoth_Valley:
-                case GW::Constants::MapID::Sardelac_Sanitarium_outpost:
-                case GW::Constants::MapID::The_Breach:
-                case GW::Constants::MapID::The_Great_Northern_Wall:
-                case GW::Constants::MapID::Warband_Training:
-                case GW::Constants::MapID::Warband_of_Brothers_Level_1:
-                case GW::Constants::MapID::Warband_of_Brothers_Level_2:
-                case GW::Constants::MapID::Warband_of_Brothers_Level_3:
-                    return GW::Constants::TitleID::Vanguard;
-                case GW::Constants::MapID::Abaddons_Gate:
-                case GW::Constants::MapID::Basalt_Grotto_outpost:
-                case GW::Constants::MapID::Bone_Palace_outpost:
-                case GW::Constants::MapID::Crystal_Overlook:
-                case GW::Constants::MapID::Depths_of_Madness:
-                case GW::Constants::MapID::Domain_of_Anguish:
-                case GW::Constants::MapID::Domain_of_Fear:
-                case GW::Constants::MapID::Domain_of_Pain:
-                case GW::Constants::MapID::Domain_of_Secrets:
-                case GW::Constants::MapID::The_Ebony_Citadel_of_Mallyx_mission:
-                case GW::Constants::MapID::Dzagonur_Bastion:
-                case GW::Constants::MapID::Forum_Highlands:
-                case GW::Constants::MapID::Gate_of_Desolation:
-                case GW::Constants::MapID::Gate_of_Fear_outpost:
-                case GW::Constants::MapID::Gate_of_Madness:
-                case GW::Constants::MapID::Gate_of_Pain:
-                case GW::Constants::MapID::Gate_of_Secrets_outpost:
-                case GW::Constants::MapID::Gate_of_Torment_outpost:
-                case GW::Constants::MapID::Gate_of_the_Nightfallen_Lands_outpost:
-                case GW::Constants::MapID::Grand_Court_of_Sebelkeh:
-                case GW::Constants::MapID::Heart_of_Abaddon:
-                case GW::Constants::MapID::Jennurs_Horde:
-                case GW::Constants::MapID::Jokos_Domain:
-                case GW::Constants::MapID::Lair_of_the_Forgotten_outpost:
-                case GW::Constants::MapID::Nightfallen_Coast:
-                case GW::Constants::MapID::Nightfallen_Garden:
-                case GW::Constants::MapID::Nightfallen_Jahai:
-                case GW::Constants::MapID::Nundu_Bay:
-                case GW::Constants::MapID::Poisoned_Outcrops:
-                case GW::Constants::MapID::Remains_of_Sahlahja:
-                case GW::Constants::MapID::Ruins_of_Morah:
-                case GW::Constants::MapID::The_Alkali_Pan:
-                case GW::Constants::MapID::The_Mirror_of_Lyss:
-                case GW::Constants::MapID::The_Mouth_of_Torment_outpost:
-                case GW::Constants::MapID::The_Ruptured_Heart:
-                case GW::Constants::MapID::The_Shadow_Nexus:
-                case GW::Constants::MapID::The_Shattered_Ravines:
-                case GW::Constants::MapID::The_Sulfurous_Wastes:
-                case GW::Constants::MapID::Throne_of_Secrets:
-                case GW::Constants::MapID::Vehtendi_Valley:
-                case GW::Constants::MapID::Yatendi_Canyons:
-                    return GW::Constants::TitleID::Lightbringer;
-            }
-            return GW::Constants::TitleID::None;
+        GW::Constants::TitleID GetTitleForMap(GW::Constants::MapID map_id)
+        {
+            const auto titles = GetTitlesForMap(map_id);
+            return titles.empty() ? GW::Constants::TitleID::None : titles[0];
         }
 
         void PingCompass(const GW::GamePos& position)
@@ -298,14 +189,21 @@ namespace GW {
             constexpr float compass_scale = 96.f;
             GW::GameThread::Enqueue([cpy = position]() {
                 GW::UI::CompassPoint point({std::lroundf(cpy.x / compass_scale), std::lroundf(cpy.y / compass_scale)});
-                GW::UI::UIPacket::kCompassDraw packet = {
-                    .player_number = GW::PlayerMgr::GetPlayerNumber(),
-                    .session_id = (uint32_t)TIMER_INIT(),
-                    .number_of_points = 1,
-                    .points = &point
-                };
+                GW::UI::UIPacket::kCompassDraw packet = {.player_number = GW::PlayerMgr::GetPlayerNumber(), .session_id = (uint32_t)TIMER_INIT(), .number_of_points = 1, .points = &point};
                 GW::UI::SendUIMessage(GW::UI::UIMessage::kCompassDraw, &packet);
             });
+        }
+
+        bool IsPreSearing(const GW::Constants::MapID map_id)
+        {
+            const auto map_info = GW::Map::GetMapInfo(map_id);
+            if (!map_info) return false;
+            constexpr std::array presearing_dungeon_ids = {
+                GW::Constants::MapID::Forsaken_Tunnels_Presearing_Level1,
+                GW::Constants::MapID::Forsaken_Tunnels_Presearing_Level2,
+                GW::Constants::MapID::Forsaken_Tunnels_Presearing_Level3,
+            };
+            return map_info->region == GW::Region::Region_Presearing || std::find(presearing_dungeon_ids.begin(), presearing_dungeon_ids.end(), map_id) != presearing_dungeon_ids.end();
         }
 
         GW::Array<GW::MapProp*>* GetMapProps()
@@ -314,38 +212,68 @@ namespace GW {
             const auto p = m ? m->props : nullptr;
             return p ? &p->propArray : nullptr;
         }
+
+        bool IsFestivalOutpost(const GW::Constants::MapID map_id)
+        {
+            using namespace GW::Constants;
+            switch (map_id) {
+                case MapID::Kamadan_Jewel_of_Istan_Halloween_outpost:
+                case MapID::Kamadan_Jewel_of_Istan_Wintersday_outpost:
+                case MapID::Kamadan_Jewel_of_Istan_Canthan_New_Year_outpost:
+                case MapID::Lions_Arch_Halloween_outpost:
+                case MapID::Lions_Arch_Wintersday_outpost:
+                case MapID::Lions_Arch_Canthan_New_Year_outpost:
+                case MapID::Ascalon_City_Wintersday_outpost:
+                case MapID::Droknars_Forge_Halloween_outpost:
+                case MapID::Droknars_Forge_Wintersday_outpost:
+                case MapID::Tomb_of_the_Primeval_Kings_Halloween_outpost:
+                case MapID::Shing_Jea_Monastery_Dragon_Festival_outpost:
+                case MapID::Shing_Jea_Monastery_Canthan_New_Year_outpost:
+                case MapID::Kaineng_Center_Canthan_New_Year_outpost:
+                case MapID::Eye_of_the_North_outpost_Wintersday_outpost:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
     } // namespace Map
+    namespace SkillbarMgr {
+        GW::Attribute* GetPlayerAttribute(GW::Constants::Attribute attribute_id)
+        {
+            const auto my_id = GW::Agents::GetControlledCharacterId();
+            PartyAttributeArray& party_attributes = GW::GetWorldContext()->attributes;
+            for (PartyAttribute& agent_attributes : party_attributes) {
+                if (agent_attributes.agent_id != my_id) continue;
+                return &agent_attributes.attribute[(uint32_t)attribute_id];
+            }
+            return 0;
+        }
+    } // namespace SkillbarMgr
     namespace LoginMgr {
-        const bool IsCharSelectReady() {
-            return GW::UI::GetFrameContext(GetSelectorFrame());
+        const bool IsCharSelectReady()
+        {
+            uint32_t ui_state = 10;
+            SendUIMessage(GW::UI::UIMessage::kCheckUIState, nullptr, &ui_state);
+            const auto frame = GetSelectorFrame();
+            if (!(ui_state == 2 && frame && frame->IsVisible())) return false;
+            const auto ctx = (CharSelectorContext*)GW::UI::GetFrameContext(frame);
+            return ((uintptr_t)ctx > 0xFFFF) && ctx->frame_id == frame->frame_id;
         }
 
         const bool SelectCharacterToPlay(const wchar_t* name, bool play)
         {
+            if (!(name && *name && IsCharSelectReady())) return false;
 
-            struct CharSelectorChar {
-                uint32_t h0000;
-                uint32_t h0004;
-                uint32_t h0008;
-                uint32_t h000C;
-                uint32_t h0010;
-                uint32_t h0014;
-                uint32_t h0018;
-                uint32_t h001C;
-                wchar_t name[0x14];
-                // ...
-            };
-            struct CharSelectorContext {
-                uint32_t vtable;
-                uint32_t frame_id;
-                GW::Array<CharSelectorChar*> chars;
-                // ...
-            };
             const auto selector = GetSelectorFrame();
+            if (!(selector && selector->IsVisible())) return false;
+
             const auto ctx = (CharSelectorContext*)GW::UI::GetFrameContext(selector);
-            if (!(name && ctx)) return false;
+            if (!(((uintptr_t)ctx > 0xFFFF) && ctx->frame_id == selector->frame_id)) return false;
 
             const auto panes = GW::UI::GetChildFrame(selector, 0);
+            const auto parent = GW::UI::GetParentFrame(selector);
+            if (!(panes && parent)) return false;
 
             uint32_t selected_idx = 0;
             GW::UI::SendFrameUIMessage(panes, GW::UI::UIMessage::kFrameMessage_0x4a, 0, (void*)&selected_idx);
@@ -353,20 +281,25 @@ namespace GW {
             uint32_t target_idx = 0xffff;
 
             const auto len = ctx->chars.size();
+            if (!len) return false;
+
+            if (selected_idx >= len) selected_idx = 0;
 
             bool chosen = false;
             for (size_t i = 0; !chosen && i < len; i++) {
                 const auto c = ctx->chars[i];
-                if (!(c && wcscmp(c->name, name) == 0)) 
-                    continue; // Not this character
+                if (!(c && wcscmp(c->name, name) == 0)) continue; // Not this character
                 target_idx = i;
                 break;
             }
-            if (target_idx > len) 
-                return false;
+            if (target_idx >= len) return false;
 
 
             auto select_char = [&](size_t idx) {
+                if (idx >= ctx->chars.size()) return false;
+                const auto c = ctx->chars[idx];
+                if (!(c && c->name[0])) return false;
+
                 GW::UI::UIPacket::kMouseAction action{};
                 action.frame_id = selector->frame_id;
                 action.child_offset_id = selector->child_offset_id;
@@ -374,40 +307,33 @@ namespace GW {
                     const wchar_t* name;
                     uint32_t play;
                 };
-                button_param wparam = {ctx->chars[idx]->name, 0u};
+                button_param wparam = {c->name, 0u};
                 action.wparam = &wparam;
                 action.current_state = GW::UI::UIPacket::ActionState::MouseClick;
 
-                if (!GW::UI::SendFrameUIMessage(GW::UI::GetParentFrame(selector), GW::UI::UIMessage::kMouseClick2, &action)) 
-                    return false;
+                if (!GW::UI::SendFrameUIMessage(parent, GW::UI::UIMessage::kMouseClick2, &action)) return false;
                 GW::UI::SendFrameUIMessage(panes, GW::UI::UIMessage::kFrameMessage_0x4a, 0, (void*)&selected_idx);
                 return selected_idx == idx;
             };
 
             // Navigate to target character by selecting previous/next until we reach it
             while (target_idx < selected_idx) {
-                // Need to go backwards - select the previous character
-                if (selected_idx == 0) 
-                    break; // Can't go before first character
-                if (!select_char(selected_idx - 1)) 
-                    return false;
+                if (selected_idx == 0) break; // Can't go before first character
+                if (!select_char(selected_idx - 1)) return false;
             }
 
             while (target_idx > selected_idx) {
-                // Need to go forwards - select the next character
-                if (selected_idx >= ctx->chars.size() - 1) 
-                    break; // Can't go past last character
-                if (!select_char(selected_idx + 1)) 
-                    return false;
+                const auto chars_size = ctx->chars.size();
+                if (!chars_size || selected_idx + 1 >= chars_size) break; // Can't go past last character
+                if (!select_char(selected_idx + 1)) return false;
             }
             chosen = selected_idx == target_idx;
 
-            if (!chosen) 
-                return false;
+            if (!chosen) return false;
 
             return (!play || GW::UI::ButtonClick(GW::UI::GetFrameByLabel(L"Play")));
         }
-    }
+    } // namespace LoginMgr
 
 
     namespace PartyMgr {
@@ -422,8 +348,7 @@ namespace GW {
             const auto players = GetPartyPlayers(party_id);
             if (!players) return 0;
             for (size_t i = 0, size = players->size(); i < size; i++) {
-                if (players->at(i).login_number == player_number)
-                    return i + 1;
+                if (players->at(i).login_number == player_number) return i + 1;
             }
             return 0;
         }
@@ -440,8 +365,7 @@ namespace GW {
                     return player ? player->agent_id : 0;
                 }
                 for (const auto& hero : party->heroes) {
-                    if (hero.owner_player_id != player_member.login_number)
-                        continue;
+                    if (hero.owner_player_id != player_member.login_number) continue;
                     current_idx++;
                     if (current_idx == party_member_index) {
                         return hero.agent_id;
@@ -456,7 +380,8 @@ namespace GW {
             }
             return 0;
         }
-        std::vector<uint32_t> GetPartyAgentIds(uint32_t party_id) {
+        std::vector<uint32_t> GetPartyAgentIds(uint32_t party_id)
+        {
             std::vector<uint32_t> out;
             for (size_t i = 0; i < 12; i++) {
                 const auto agent_id = GetPartyMemberAgentId(i, party_id);
@@ -470,7 +395,7 @@ namespace GW {
             const auto party_agents = GetPartyAgentIds(party_id);
             return std::find(party_agents.begin(), party_agents.end(), agent_id) != party_agents.end();
         }
-    }
+    } // namespace PartyMgr
 
     namespace AccountMgr {
         GW::Array<AvailableCharacterInfo>* GetAvailableChars()
@@ -483,7 +408,6 @@ namespace GW {
                 if (address) {
                     available_chars_ptr = *(GW::Array<AvailableCharacterInfo>**)address;
                 }
-
             }
             return available_chars_ptr;
         }
@@ -504,6 +428,7 @@ namespace GW {
         {
             if (!account_uuid) {
                 auto address = GW::Scanner::Find("\x50\x6a\x18\x6a\x02\xff\x15", "xxxxxxx", 0x7);
+                DEBUG_ASSERT(address);
                 if (address && GW::Scanner::IsValidPtr(*(uintptr_t*)address, GW::ScannerSection::Section_DATA)) {
                     address = *(uintptr_t*)address;
                     account_uuid = (GUID*)(address + 0x90);
@@ -512,39 +437,90 @@ namespace GW {
             return account_uuid;
         }
 
+        GUID GetAccountUuid()
+        {
+            const auto uuid = GetPortalAccountUuid();
+            if (uuid) return *uuid;
+            const auto email = GetAccountEmail();
+            return email && *email ? TextUtils::ConvertWStringToGuid(email) : GUID{};
+        }
+
         AvailableCharacterInfo* GetAvailableCharacter(const wchar_t* name)
         {
             const auto characters = name ? GetAvailableChars() : nullptr;
-            if (!characters)
-                return nullptr;
+            if (!characters) return nullptr;
             for (auto& ac : *characters) {
-                if (wcscmp(ac.player_name, name) == 0)
-                    return &ac;
+                if (wcscmp(ac.player_name, name) == 0) return &ac;
             }
             return nullptr;
         }
-    }
+    } // namespace AccountMgr
 
     namespace MemoryMgr {
+        // Appends an element to a GW-managed array, growing the buffer via MemRealloc if at capacity.
+        // Returns a pointer to the newly appended element.
+        template <typename T>
+        T* AddToGuildWarsArray(GW::BaseArray<T>& arr, const T& element)
+        {
+            if (arr.m_size >= arr.m_capacity) {
+                auto* new_buf = static_cast<T*>(MemRealloc(arr.m_buffer, (arr.m_size + 1) * sizeof(T)));
+                GWCA_ASSERT(new_buf);
+                arr.m_buffer = new_buf;
+                arr.m_capacity++;
+            }
+            arr.m_buffer[arr.m_size] = element;
+            return &arr.m_buffer[arr.m_size++];
+        }
+
+        // Removes the element at index from a GW-managed array by shifting remaining elements left.
+        // Capacity is unchanged so future AddToGuildWarsArray calls reuse the slack without reallocating.
+        template <typename T>
+        void RemoveFromGwArray(GW::BaseArray<T>& arr, uint32_t index)
+        {
+            GWCA_ASSERT(index < arr.m_size);
+            const auto remaining = arr.m_size - index - 1;
+            if (remaining > 0) memmove(&arr.m_buffer[index], &arr.m_buffer[index + 1], remaining * sizeof(T));
+            arr.m_size--;
+        }
         bool GetPersonalDir(std::wstring& out)
         {
             out.resize(512, 0);
-            if (!GetPersonalDir(out.capacity(), out.data()))
-                return false;
+            if (!GetPersonalDir(out.capacity(), out.data())) return false;
             out.resize(wcslen(out.data()));
             return !out.empty();
         }
-    }
+        std::filesystem::path GetBuildsDir()
+        {
+            std::wstring builds_folder;
+            GetPersonalDir(builds_folder);
+            if (builds_folder.empty()) return L"";
+            return std::filesystem::path(builds_folder) / L"Guild Wars" / L"Templates" / L"Skills";
+        }
+    } // namespace MemoryMgr
 
     namespace UI {
+        void AsyncDecodeStrS(const wchar_t* enc_str, std::string* out, GW::Constants::Language language_id)
+        {
+            AsyncDecodeStr(
+                enc_str,
+                [](void* param, const wchar_t* s) {
+                    *(std::string*)param = TextUtils::WStringToString(s);
+                },
+                out, language_id
+            );
+        }
         void AsyncDecodeStr(const wchar_t* enc_str, std::wstring* out, GW::Constants::Language language_id)
         {
-            out->clear();
-            AsyncDecodeStr(enc_str, [](void* param, const wchar_t* s) {
-                *(std::wstring*)param = s;
-            }, out, language_id);
+            AsyncDecodeStr(
+                enc_str,
+                [](void* param, const wchar_t* s) {
+                    *(std::wstring*)param = s;
+                },
+                out, language_id
+            );
         }
-        bool BelongsToFrame(GW::UI::Frame* parent, GW::UI::Frame* child) {
+        bool BelongsToFrame(GW::UI::Frame* parent, GW::UI::Frame* child)
+        {
             while (child && parent) {
                 if (child == parent) {
                     return true;
@@ -553,7 +529,15 @@ namespace GW {
             }
             return false;
         }
-        void Screenshot() {
+        GW::UI::Frame* GetNthParentFrame(GW::UI::Frame* frame, uint32_t n)
+        {
+            for (uint32_t i = 0; i < n && frame; i++) {
+                frame = GetParentFrame(frame);
+            }
+            return frame;
+        }
+        void Screenshot()
+        {
             GW::GameThread::Enqueue([] {
                 if (!GW::Map::GetIsMapLoaded() || !GW::Agents::GetControlledCharacter()) return;
                 const auto frame = GW::UI::GetFrameByLabel(L"Game");
@@ -561,13 +545,46 @@ namespace GW {
                 Keypress(GW::UI::ControlAction_Screenshot, GW::UI::GetParentFrame(frame));
             });
         }
-    }
+        bool IsLoadingScreenShown()
+        {
+            return GW::UI::GetFrameByLabel(L"Mission") != nullptr;
+        }
+    } // namespace UI
 
+    namespace PlayerMgr {
+        bool IsMelandrusAccord()
+        {
+            const auto c = GW::PlayerMgr::GetPlayerByID();
+            return (c->reforged_or_dhuums_flags & 0x2) != 0;
+        }
+        GW::GamePos* GetPlayerPosition()
+        {
+            const auto player = GW::Agents::GetControlledCharacter();
+            return player ? &player->pos : nullptr;
+        }
+        bool IsDeprecatedTitle(GW::Constants::TitleID title_id)
+        {
+            using namespace GW::Constants;
+            switch (title_id) {
+                case TitleID::Deprecated_SkillHunter:
+                case TitleID::Deprecated_TreasureHunter:
+                case TitleID::Deprecated_Wisdom:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    } // namespace PlayerMgr
     namespace Agents {
-        bool IsAgentCarryingBundle(uint32_t agent_id) {
+        bool IsAgentCarryingBundle(uint32_t agent_id)
+        {
             const auto agent = (GW::AgentLiving*)GW::Agents::GetAgentByID(agent_id);
             const auto held_item = agent && agent->GetIsLivingType() ? GW::Items::GetItemById(agent->weapon_item_id) : 0;
             return held_item && held_item->type == GW::Constants::ItemType::Bundle;
+        }
+        void AsyncGetAgentName(const uint32_t agent_id, std::wstring& out)
+        {
+            UI::AsyncDecodeStr(GetAgentEncName(agent_id), &out);
         }
         void AsyncGetAgentName(const Agent* agent, std::wstring& out)
         {
@@ -577,16 +594,11 @@ namespace GW {
     namespace Items {
         GW::Constants::Rarity GetRarity(const GW::Item* item)
         {
-            if(!item)
-                return GW::Constants::Rarity::Unknown;
-            if ((item->interaction & 0x10) != 0) 
-                return GW::Constants::Rarity::Green;
-            if ((item->interaction & 0x400000) != 0) 
-                return GW::Constants::Rarity::Purple;
-            if ((item->interaction & 0x20000) != 0) 
-                return GW::Constants::Rarity::Gold;
-            if (item->single_item_name && item->single_item_name[0] == 0xA3F) 
-                return GW::Constants::Rarity::Blue;
+            if (!item) return GW::Constants::Rarity::Unknown;
+            if ((item->interaction & 0x10) != 0) return GW::Constants::Rarity::Green;
+            if ((item->interaction & 0x400000) != 0) return GW::Constants::Rarity::Purple;
+            if ((item->interaction & 0x20000) != 0) return GW::Constants::Rarity::Gold;
+            if (item->single_item_name && item->single_item_name[0] == 0xA3F) return GW::Constants::Rarity::Blue;
             return GW::Constants::Rarity::White;
         }
 
@@ -594,17 +606,17 @@ namespace GW {
         {
             switch (rarity) {
                 case GW::Constants::Rarity::White:
-                    return IM_COL32(230, 230, 230, 255);
+                    return GW::Chat::TextColor::ColorItemCommon;
                 case GW::Constants::Rarity::Blue:
-                    return IM_COL32(37, 150, 190, 255);
+                    return GW::Chat::TextColor::ColorItemEnhance;
                 case GW::Constants::Rarity::Purple:
-                    return IM_COL32(124, 95, 168, 255);
+                    return GW::Chat::TextColor::ColorItemUncommon;
                 case GW::Constants::Rarity::Gold:
-                    return IM_COL32(253, 202, 83, 255);
+                    return GW::Chat::TextColor::ColorItemRare;
                 case GW::Constants::Rarity::Green:
-                    return IM_COL32(0, 230, 0, 255);
+                    return GW::Chat::TextColor::ColorItemUnique;
             }
-            return IM_COL32(128, 128, 128, 255);
+            return GW::Chat::TextColor::ColorItemDull;
         }
 
         const char* GetItemTypeName(const GW::Constants::ItemType item_type)
@@ -626,7 +638,7 @@ namespace GW {
                 case ItemType::Chestpiece:
                     return "Chestpiece";
                 case ItemType::Rune_Mod:
-                    return "Rune";
+                    return "Rune/Upgrade";
                 case ItemType::Usable:
                     return "Usable Item";
                 case ItemType::Dye:
@@ -687,7 +699,53 @@ namespace GW {
             }
         }
 
-        uint32_t GetUses(GW::Item* item) {
+        const MaterialInfo* GetMaterialInfo(GW::Constants::MaterialSlot slot)
+        {
+            using namespace GW::Constants;
+            static const std::unordered_map<MaterialSlot, MaterialInfo> material_info = {
+                {MaterialSlot::Bone, {GW::EncStrings::Bone, GW::Constants::ItemID::Bone}},
+                {MaterialSlot::IronIngot, {GW::EncStrings::IronIngot, GW::Constants::ItemID::IronIngot}},
+                {MaterialSlot::TannedHideSquare, {GW::EncStrings::TannedHideSquare, GW::Constants::ItemID::TannedHideSquare}},
+                {MaterialSlot::Scale, {GW::EncStrings::Scale, GW::Constants::ItemID::Scale}},
+                {MaterialSlot::ChitinFragment, {GW::EncStrings::ChitinFragment, GW::Constants::ItemID::ChitinFragment}},
+                {MaterialSlot::BoltofCloth, {GW::EncStrings::BoltofCloth, GW::Constants::ItemID::BoltofCloth}},
+                {MaterialSlot::WoodPlank, {GW::EncStrings::WoodPlank, GW::Constants::ItemID::WoodPlank}},
+                {MaterialSlot::GraniteSlab, {GW::EncStrings::GraniteSlab, GW::Constants::ItemID::GraniteSlab}},
+                {MaterialSlot::PileofGlitteringDust, {GW::EncStrings::PileofGlitteringDust, GW::Constants::ItemID::PileofGlitteringDust}},
+                {MaterialSlot::PlantFiber, {GW::EncStrings::PlantFiber, GW::Constants::ItemID::PlantFiber}},
+                {MaterialSlot::Feather, {GW::EncStrings::Feather, GW::Constants::ItemID::Feather}},
+                {MaterialSlot::FurSquare, {GW::EncStrings::FurSquare, GW::Constants::ItemID::FurSquare}},
+                {MaterialSlot::BoltofLinen, {GW::EncStrings::BoltofLinen, GW::Constants::ItemID::BoltofLinen}},
+                {MaterialSlot::BoltofDamask, {GW::EncStrings::BoltofDamask, GW::Constants::ItemID::BoltofDamask}},
+                {MaterialSlot::BoltofSilk, {GW::EncStrings::BoltofSilk, GW::Constants::ItemID::BoltofSilk}},
+                {MaterialSlot::GlobofEctoplasm, {GW::EncStrings::GlobofEctoplasm, GW::Constants::ItemID::GlobofEctoplasm}},
+                {MaterialSlot::SteelIngot, {GW::EncStrings::SteelIngot, GW::Constants::ItemID::SteelIngot}},
+                {MaterialSlot::DeldrimorSteelIngot, {GW::EncStrings::DeldrimorSteelIngot, GW::Constants::ItemID::DeldrimorSteelIngot}},
+                {MaterialSlot::MonstrousClaw, {GW::EncStrings::MonstrousClaw, GW::Constants::ItemID::MonstrousClaw}},
+                {MaterialSlot::MonstrousEye, {GW::EncStrings::MonstrousEye, GW::Constants::ItemID::MonstrousEye}},
+                {MaterialSlot::MonstrousFang, {GW::EncStrings::MonstrousFang, GW::Constants::ItemID::MonstrousFang}},
+                {MaterialSlot::Ruby, {GW::EncStrings::Ruby, GW::Constants::ItemID::Ruby}},
+                {MaterialSlot::Sapphire, {GW::EncStrings::Sapphire, GW::Constants::ItemID::Sapphire}},
+                {MaterialSlot::Diamond, {GW::EncStrings::Diamond, GW::Constants::ItemID::Diamond}},
+                {MaterialSlot::OnyxGemstone, {GW::EncStrings::OnyxGemstone, GW::Constants::ItemID::OnyxGemstone}},
+                {MaterialSlot::LumpofCharcoal, {GW::EncStrings::LumpofCharcoal, GW::Constants::ItemID::LumpofCharcoal}},
+                {MaterialSlot::ObsidianShard, {GW::EncStrings::ObsidianShard, GW::Constants::ItemID::ObsidianShard}},
+                {MaterialSlot::TemperedGlassVial, {GW::EncStrings::TemperedGlassVial, GW::Constants::ItemID::TemperedGlassVial}},
+                {MaterialSlot::LeatherSquare, {GW::EncStrings::LeatherSquare, GW::Constants::ItemID::LeatherSquare}},
+                {MaterialSlot::ElonianLeatherSquare, {GW::EncStrings::ElonianLeatherSquare, GW::Constants::ItemID::ElonianLeatherSquare}},
+                {MaterialSlot::VialofInk, {GW::EncStrings::VialofInk, GW::Constants::ItemID::VialofInk}},
+                {MaterialSlot::RollofParchment, {GW::EncStrings::RollofParchment, GW::Constants::ItemID::RollofParchment}},
+                {MaterialSlot::RollofVellum, {GW::EncStrings::RollofVellum, GW::Constants::ItemID::RollofVellum}},
+                {MaterialSlot::SpiritwoodPlank, {GW::EncStrings::SpiritwoodPlank, GW::Constants::ItemID::SpiritwoodPlank}},
+                {MaterialSlot::AmberChunk, {GW::EncStrings::AmberChunk, GW::Constants::ItemID::AmberChunk}},
+                {MaterialSlot::JadeiteShard, {GW::EncStrings::JadeiteShard, GW::Constants::ItemID::JadeiteShard}},
+            };
+            const auto found = material_info.find(slot);
+            return found == material_info.end() ? nullptr : &found->second;
+        }
+
+        uint32_t GetUses(const GW::Item* item)
+        {
             if (!item) return 0;
             const GW::ItemModifier* mod = item->mod_struct;
             for (DWORD i = 0; mod && i < item->mod_struct_size; i++) {
@@ -699,7 +757,8 @@ namespace GW {
             return item->quantity;
         }
 
-        uint32_t GetAlcoholPointsPerUse(GW::Item* item) {
+        uint32_t GetAlcoholPointsPerUse(const GW::Item* item)
+        {
             if (!item) return 0;
             switch (item->model_id) {
                 case GW::Constants::ItemID::Eggnog:
@@ -723,7 +782,7 @@ namespace GW {
             return 0;
         }
 
-        bool IsAlcohol(GW::Item* item)
+        bool IsAlcohol(const GW::Item* item)
         {
             return GetAlcoholPointsPerUse(item) > 0;
         }
@@ -789,10 +848,84 @@ namespace GW {
             return "Unknown";
         }
 
-    }
-}
+    } // namespace Items
+
+    namespace Effects {
+
+        // Effect IDs for custom (synthetic) effects use the high byte 0x0f to avoid collisions.
+        // The full ID is 0x0f000000 | skill_id, making it deterministic and recyclable per skill.
+        static constexpr uint32_t custom_effect_id_base = 0x0f000000;
+
+        uint32_t AddCustomEffect(const GW::Constants::SkillID skill_id, const float duration_seconds)
+        {
+            const auto player_effects = GW::Effects::GetPlayerEffectsArray();
+            if (!player_effects) return 0;
+            auto& arr = player_effects->effects;
+
+            const uint32_t target_id = custom_effect_id_base | static_cast<uint32_t>(skill_id);
+
+            RemoveCustomEffect(target_id);
+
+            GW::Effect new_effect{};
+            new_effect.skill_id = skill_id;
+            new_effect.effect_id = target_id;
+            new_effect.duration = duration_seconds;
+            new_effect.timestamp = GW::MemoryMgr::GetSkillTimer();
+            new_effect.attribute_level = 0;
+            new_effect.agent_id = 0;
+
+            GW::UI::UIPacket::kEffectAdd packet{};
+            packet.agent_id = GW::Agents::GetControlledCharacterId();
+            packet.effect = GW::MemoryMgr::AddToGuildWarsArray(arr, new_effect);
+            GW::UI::SendUIMessage(GW::UI::UIMessage::kEffectAdd, &packet);
+            return target_id;
+        }
+
+        bool RemoveCustomEffect(const uint32_t effect_id)
+        {
+            if ((effect_id & 0xff000000) != custom_effect_id_base) return false;
+            const auto player_effects = GW::Effects::GetPlayerEffectsArray();
+            if (!player_effects) return false;
+            auto& arr = player_effects->effects;
+            for (uint32_t i = 0; i < arr.m_size; i++) {
+                if (arr.m_buffer[i].effect_id != effect_id) continue;
+                GW::MemoryMgr::RemoveFromGwArray(arr, i);
+                GW::UI::SendUIMessage(GW::UI::UIMessage::kEffectRemove, reinterpret_cast<void*>(static_cast<uintptr_t>(effect_id)));
+                return true;
+            }
+            return false;
+        }
+
+    } // namespace Effects
+
+} // namespace GW
 
 namespace ToolboxUtils {
+    bool FrameRateCheck(clock_t& last_checked, clock_t fps)
+    {
+        const auto now = TIMER_INIT();
+        if (now - last_checked > CLOCKS_PER_SEC / fps) {
+            last_checked = now;
+            return true;
+        }
+        return false;
+    }
+    std::wstring TimeToEncString(clock_t time)
+    {
+        static constexpr std::pair<clock_t, wchar_t> units[] = {
+            {60 * 60 * 24 * 7, 0x768}, {60 * 60 * 24, 0x767}, {3 * 60 * 60, 0x766}, {60, 0x765}, {1, 0x764},
+        };
+
+        for (const auto& [divisor, token] : units) {
+            if (time < divisor) continue;
+            wchar_t buf[4];
+            ASSERT(GW::UI::UInt32ToEncStr(time / divisor, buf, _countof(buf)));
+            return std::format(L"\x763\x101{}\x10A{}\x1", buf, token);
+        }
+
+        return L"\x101";
+    }
+
     bool ArrayBoolAt(const GW::Array<uint32_t>& array, const uint32_t index)
     {
         const uint32_t real_index = index / 32;
@@ -805,11 +938,20 @@ namespace ToolboxUtils {
         return res != 0;
     }
 
+    bool IsOutpost()
+    {
+        return GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost;
+    }
+
+    bool IsExplorable()
+    {
+        return GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable;
+    }
+
     uint8_t GetMissionState(GW::Constants::MapID map_id, const GW::Array<uint32_t>& missions_completed, const GW::Array<uint32_t>& missions_bonus)
     {
         const auto area_info = GW::Map::GetMapInfo(map_id);
-        if (!area_info)
-            return 0;
+        if (!area_info) return 0;
         switch (area_info->type) {
             case GW::RegionType::CooperativeMission:
             case GW::RegionType::MissionOutpost:
@@ -836,12 +978,9 @@ namespace ToolboxUtils {
                 break;
         }
 
-        if (primary)
-            state_out |= MissionState::Primary;
-        if (expert)
-            state_out |= MissionState::Expert;
-        if (master)
-            state_out |= MissionState::Master;
+        if (primary) state_out |= MissionState::Primary;
+        if (expert) state_out |= MissionState::Expert;
+        if (master) state_out |= MissionState::Master;
         return state_out;
     }
 
@@ -860,16 +999,6 @@ namespace ToolboxUtils {
     uint8_t GetMissionState()
     {
         return GetMissionState(GW::Map::GetMapID(), GW::PartyMgr::GetIsPartyInHardMode());
-    }
-
-    bool IsOutpost()
-    {
-        return GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost;
-    }
-
-    bool IsExplorable()
-    {
-        return GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable;
     }
 
     GW::Player* GetPlayerByName(const wchar_t* _name)
@@ -899,9 +1028,18 @@ namespace ToolboxUtils {
         if (!player_number) {
             player = GW::PlayerMgr::GetPlayerByID(GW::PlayerMgr::GetPlayerNumber());
             if (!player || !player->name) {
-                // Map not loaded; try to get from character context
+                // Map not loaded; try to get from character context.
+                // player_name is a fixed-size buffer that may not be populated/null-terminated
+                // yet (e.g. still on the login/char select screen); reading it unbounded via
+                // wcslen can run off into unrelated memory and produce garbled (often CJK-looking)
+                // output. Bail out to an empty string instead so callers retry later.
                 const auto c = GW::GetCharContext();
-                return c ? c->player_name : L"";
+                if (!c) {
+                    return L"";
+                }
+                constexpr size_t max_len = sizeof(c->player_name) / sizeof(c->player_name[0]);
+                const size_t len = wcsnlen(c->player_name, max_len);
+                return len < max_len ? std::wstring(c->player_name, len) : L"";
             }
         }
         else {
@@ -992,6 +1130,30 @@ namespace ToolboxUtils {
                 }
                 return true;
             }
+        }
+        return false;
+    }
+
+    bool IsHeroUnlocked(GW::Constants::HeroID hero_id)
+    {
+        const auto w = GW::GetWorldContext();
+        if (!(w && w->hero_info.size())) {
+            return false;
+        }
+        for (auto& a : w->hero_info) {
+            if (a.hero_id != hero_id) continue;
+            switch (hero_id) {
+                case GW::Constants::HeroID::Merc1:
+                case GW::Constants::HeroID::Merc2:
+                case GW::Constants::HeroID::Merc3:
+                case GW::Constants::HeroID::Merc4:
+                case GW::Constants::HeroID::Merc5:
+                case GW::Constants::HeroID::Merc6:
+                case GW::Constants::HeroID::Merc7:
+                case GW::Constants::HeroID::Merc8:
+                    return (a.appearance_bitmap && !wcseq(GW::AccountMgr::GetCurrentPlayerName(), a.name)); // Unlocked, but not assigned.
+            }
+            return true;
         }
         return false;
     }
@@ -1113,6 +1275,12 @@ namespace ToolboxUtils {
         return player && IsPlayerInParty(player->player_number);
     }
 
+    // Check if agent is in player's own party (0)
+    bool IsAgentInMyParty(const uint32_t agent_id)
+    {
+        return GW::PartyMgr::IsAgentInParty(agent_id, 0);
+    }
+
     float GetSkillRange(const GW::Constants::SkillID skill_id)
     {
         const auto skill = GW::SkillbarMgr::GetSkillConstantData(skill_id);
@@ -1182,14 +1350,14 @@ namespace ToolboxUtils {
 
                 static constexpr ctll::fixed_string stacking_pattern = L"\x2.\x10A\xA84\x10A(.{1,2})\x1\x101\x101\x1\x2\xA3E\x10A\xAA8\x10A\xAB1\x1\x1";
                 if (const auto stacking_match = ctre::match<stacking_pattern>(item_str)) {
-                    auto capture = stacking_match.get<1>().to_view();
+                    auto capture = stacking_match.template get<1>().to_view();
                     swprintf(buffer, _countof(buffer), L"\x2\xAA8\x10A\xA84\x10A%ls\x1\x101\x101\x1", capture.data());
                     original += buffer;
                 }
 
                 static constexpr ctll::fixed_string armor_pattern = L"\xA3B\x10A\xA86\x10A\xA44\x1\x101(.)\x1\x2";
                 if (auto armor_match = ctre::match<armor_pattern>(item_str)) {
-                    auto capture = armor_match.get<1>().to_view();
+                    auto capture = armor_match.template get<1>().to_view();
                     swprintf(buffer, _countof(buffer), L"\x2\x102\x2\xA86\x10A\xA44\x1\x101%ls", capture.data());
                     original += buffer;
                 }
@@ -1204,125 +1372,118 @@ namespace ToolboxUtils {
         }
 
         // Replace "Requires 9 Divine Favor" > "q9 Divine Favor"
-        original = TextUtils::ctre_regex_replace_with_formatter<L".\x10A\x0AA8\x10A\xAA9\x10A.\x1\x101.\x1\x1">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"\x108\x107, q%d \x1\x2%c", found.at(9) - 0x100, found.at(6));
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L".\x10A\x0AA8\x10A\xAA9\x10A.\x1\x101.\x1\x1">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(buffer, _countof(buffer), L"\x108\x107, q%d \x1\x2%c", found.at(9) - 0x100, found.at(6));
+            return buffer;
+        });
 
         // Replace "Requires 9 Scythe Mastery" > "q9 Scythe Mastery"
-        original = TextUtils::ctre_regex_replace_with_formatter<L".\x10A\xAA8\x10A\xAA9\x10A\x8101.\x1\x101.\x1\x1">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"\x108\x107, q%d \x1\x2\x8101%c", found.at(10) - 0x100, found.at(7));
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L".\x10A\xAA8\x10A\xAA9\x10A\x8101.\x1\x101.\x1\x1">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(buffer, _countof(buffer), L"\x108\x107, q%d \x1\x2\x8101%c", found.at(10) - 0x100, found.at(7));
+            return buffer;
+        });
 
         // "vs. Earth damage" > "Earth"
-        original = TextUtils::ctre_regex_replace_with_formatter<L"[\xAAC\xAAF]\x10A.\x1">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"%c", found.at(2));
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"[\xAAC\xAAF]\x10A.\x1">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(buffer, _countof(buffer), L"%c", found.at(2));
+            return buffer;
+        });
 
         // Replace "Lengthens ??? duration on foes by 33%" > "??? duration +33%"
-        original = TextUtils::ctre_regex_replace_with_formatter<L"\xAA4\x10A.\x1">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"%c\x2\x108\x107 +33%%\x1", found.at(2));
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"\xAA4\x10A.\x1">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(buffer, _countof(buffer), L"%c\x2\x108\x107 +33%%\x1", found.at(2));
+            return buffer;
+        });
 
         // Replace "Reduces ??? duration on you by 20%" > "??? duration -20%"
-        original = TextUtils::ctre_regex_replace_with_formatter<L"\xAA7\x10A.\x1">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"%c\x2\x108\x107 -20%%\x1", found.at(2));
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"\xAA7\x10A.\x1">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(buffer, _countof(buffer), L"%c\x2\x108\x107 -20%%\x1", found.at(2));
+            return buffer;
+        });
 
         // Change " (while Health is above n)" to "^n";
-        original = TextUtils::ctre_regex_replace_with_formatter<L"\xAA8\x10A\xABC\x10A\xA52\x1\x101.\x1">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"\x108\x107^%d\x1", found.at(7) - 0x100);
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"\xAA8\x10A\xABC\x10A\xA52\x1\x101.\x1">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(buffer, _countof(buffer), L"\x108\x107^%d\x1", found.at(7) - 0x100);
+            return buffer;
+        });
 
         // Change "Enchantments last 20% longer" to "Ench +20%"
-        original = TextUtils::ctre_regex_replace_with_formatter<L"\xAA2\x101.">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"\x108\x107" L"Enchantments +%d%%\x1", found.at(2) - 0x100);
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"\xAA2\x101.">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(
+                buffer, _countof(buffer),
+                L"\x108\x107"
+                L"Enchantments +%d%%\x1",
+                found.at(2) - 0x100
+            );
+            return buffer;
+        });
 
         // "(Chance: 18%)" > "(18%)"
-        original = TextUtils::ctre_regex_replace_with_formatter<L"\xA87\x10A\xA48\x1\x101.">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"\x108\x107%d%%\x1", found.at(5) - 0x100);
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"\xA87\x10A\xA48\x1\x101.">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(buffer, _countof(buffer), L"\x108\x107%d%%\x1", found.at(5) - 0x100);
+            return buffer;
+        });
 
         // Change "Halves skill recharge of <attribute> spells" > "HSR <attribute>"
-        original = TextUtils::ctre_regex_replace_with_formatter<L"\xA81\x10A\xA58\x1\x10B.\x1">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"\x108\x107" L"HSR \x1\x2%c", found.at(5));
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"\xA81\x10A\xA58\x1\x10B.\x1">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(
+                buffer, _countof(buffer),
+                L"\x108\x107"
+                L"HSR \x1\x2%c",
+                found.at(5)
+            );
+            return buffer;
+        });
 
         // Change "Inscription: "Blah Blah"" to just "Blah Blah"
-        original = TextUtils::ctre_regex_replace_with_formatter<L"\x8101\x5DC5\x10A..\x1">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"%c%c", found.at(3), found.at(4));
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"\x8101\x5DC5\x10A..\x1">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(buffer, _countof(buffer), L"%c%c", found.at(3), found.at(4));
+            return buffer;
+        });
 
         // Change "Halves casting time of <attribute> spells" > "HCT <attribute>"
-        original = TextUtils::ctre_regex_replace_with_formatter<L"\xA81\x10A\xA47\x1\x10B.\x1">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"\x108\x107" L"HCT \x1\x2%c", found.at(5));
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"\xA81\x10A\xA47\x1\x10B.\x1">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(
+                buffer, _countof(buffer),
+                L"\x108\x107"
+                L"HCT \x1\x2%c",
+                found.at(5)
+            );
+            return buffer;
+        });
 
         // Change "Piercing Dmg: 11-22" > "Piercing: 11-22"
-        original = TextUtils::ctre_regex_replace_with_formatter<L"\xA89\x10A\xA4E\x1\x10B.\x1\x101.\x102.">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                swprintf(buffer, _countof(buffer), L"%c\x2\x108\x107: %d-%d\x1", found.at(5), found.at(8) - 0x100, found.at(10) - 0x100);
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"\xA89\x10A\xA4E\x1\x10B.\x1\x101.\x102.">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            swprintf(buffer, _countof(buffer), L"%c\x2\x108\x107: %d-%d\x1", found.at(5), found.at(8) - 0x100, found.at(10) - 0x100);
+            return buffer;
+        });
 
         // Change "Life draining -3, Health regeneration -1" > "Vampiric" (add at end of description)
         static constexpr ctll::fixed_string vampiric_pattern = L"\x2\x102\x2.\x10A\xA86\x10A\xA54\x1\x101.\x1\x2\x102\x2.\x10A\xA7E\x10A\xA53\x1\x101.\x1";
         if (ctre::match<vampiric_pattern>(original)) {
             original = TextUtils::ctre_regex_replace<vampiric_pattern, L"">(original);
-            original += L"\x2\x102\x2\x108\x107" L"Vampiric\x1";
+            original += L"\x2\x102\x2\x108\x107"
+                        L"Vampiric\x1";
         }
 
         // Change "Energy gain on hit 1, Energy regeneration -1" > "Zealous" (add at end of description)
         static constexpr ctll::fixed_string zealous_pattern = L"\x2\x102\x2.\x10A\xA86\x10A\xA50\x1\x101.\x1\x2\x102\x2.\x10A\xA7E\x10A\xA51\x1\x101.\x1";
         if (ctre::match<zealous_pattern>(original)) {
             original = TextUtils::ctre_regex_replace<zealous_pattern, L"">(original);
-            original += L"\x2\x102\x2\x108\x107" L"Zealous\x1";
+            original += L"\x2\x102\x2\x108\x107"
+                        L"Zealous\x1";
         }
 
         // Change "Damage" > "Dmg"
@@ -1332,42 +1493,63 @@ namespace ToolboxUtils {
         original = TextUtils::str_replace_all(original, L"\x8102\x1227", L"\xA3E");
 
         // Change "Halves casting time of spells" > "HCT"
-        original = TextUtils::str_replace_all(original, L"\xA80\x10A\xA47\x1", L"\x108\x107" L"HCT\x1");
+        original = TextUtils::str_replace_all(
+            original, L"\xA80\x10A\xA47\x1",
+            L"\x108\x107"
+            L"HCT\x1"
+        );
 
         // Change "Halves skill recharge of spells" > "HSR"
-        original = TextUtils::str_replace_all(original, L"\xA80\x10A\xA58\x1", L"\x108\x107" "HSR\x1");
+        original = TextUtils::str_replace_all(
+            original, L"\xA80\x10A\xA58\x1",
+            L"\x108\x107"
+            "HSR\x1"
+        );
 
         // Remove (Stacking) and (Non-stacking) rubbish
         original = TextUtils::ctre_regex_replace<L"\x2.\x10A\xAA8\x10A[\xAB1\xAB2]\x1\x1", L"">(original);
 
         // Replace (while affected by a(n) to just (n)
-        original = TextUtils::ctre_regex_replace_with_formatter<L"\x8101\x4D9C\x10A.\x1">(
-            original,
-            [](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                return std::wstring(1, found.at(3));
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L"\x8101\x4D9C\x10A.\x1">(original, [](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            return std::wstring(1, found.at(3));
+        });
 
         // Replace (while xxx) to just (xxx)
-        original = TextUtils::str_replace_all(original, L"\xAB4", L"\x108\x107" L"Attacking\x1");
-        original = TextUtils::str_replace_all(original, L"\xAB5", L"\x108\x107" L"Casting\x1");
-        original = TextUtils::str_replace_all(original, L"\xAB6", L"\x108\x107" L"Condition\x1");
-        original = TextUtils::ctre_regex_replace<L"[\xAB7\x4B6]", L"\x108\x107" L"Enchanted\x1">(original);
-        original = TextUtils::ctre_regex_replace<L"[\xAB8\x4B4]", L"\x108\x107" L"Hexed\x1">(original);
-        original = TextUtils::ctre_regex_replace<L"[\xAB9\xABA]", L"\x108\x107" L"Stance\x1">(original);
+        original = TextUtils::str_replace_all(
+            original, L"\xAB4",
+            L"\x108\x107"
+            L"Attacking\x1"
+        );
+        original = TextUtils::str_replace_all(
+            original, L"\xAB5",
+            L"\x108\x107"
+            L"Casting\x1"
+        );
+        original = TextUtils::str_replace_all(
+            original, L"\xAB6",
+            L"\x108\x107"
+            L"Condition\x1"
+        );
+        original = TextUtils::ctre_regex_replace<
+            L"[\xAB7\x4B6]", L"\x108\x107"
+                             L"Enchanted\x1">(original);
+        original = TextUtils::ctre_regex_replace<
+            L"[\xAB8\x4B4]", L"\x108\x107"
+                             L"Hexed\x1">(original);
+        original = TextUtils::ctre_regex_replace<
+            L"[\xAB9\xABA]", L"\x108\x107"
+                             L"Stance\x1">(original);
 
         // Combine Attribute + 3, Attribute + 1 to Attribute +3 +1 (e.g. headpiece)
-        original = TextUtils::ctre_regex_replace_with_formatter<L".\x10A\xA84\x10A.\x1\x101.\x1\x2\x102\x2.\x10A\xA84\x10A.\x1\x101.\x1">(
-            original,
-            [&buffer](auto& match) -> std::wstring {
-                auto found = match.get<0>().to_view();
-                if (found[4] != found[16]) {
-                    return std::wstring(found); // Different attributes, return unchanged
-                }
-                swprintf(buffer, _countof(buffer), L"%c\x10A\xA84\x10A%c\x1\x101%c\x2\xA84\x101%c\x1",
-                         found[0], found[4], found[7], found[19]);
-                return buffer;
-            });
+        original = TextUtils::ctre_regex_replace_with_formatter<L".\x10A\xA84\x10A.\x1\x101.\x1\x2\x102\x2.\x10A\xA84\x10A.\x1\x101.\x1">(original, [&buffer](auto& match) -> std::wstring {
+            auto found = match.template get<0>().to_view();
+            if (found[4] != found[16]) {
+                return std::wstring(found); // Different attributes, return unchanged
+            }
+            swprintf(buffer, _countof(buffer), L"%c\x10A\xA84\x10A%c\x1\x101%c\x2\xA84\x101%c\x1", found[0], found[4], found[7], found[19]);
+            return buffer;
+        });
 
         // Remove "Value: 122 gold"
         original = TextUtils::ctre_regex_replace<L"\x2\x102\x2\xA3E\x10A\xA8A\x10A\xA59\x1\x10B.\x101.(\x102.)?\x1\x1", L"">(original);
@@ -1386,19 +1568,32 @@ namespace ToolboxUtils {
 
         // Remove "20% Additional damage during festival events" > "Dmg +20% (Festival)"
         original = TextUtils::ctre_regex_replace<
-            L".\x10A\x108\x10A\x8103\xB71\x101\x100\x1\x1",
-            L"\xA85\x10A\xA4E\x1\x101\x114\x2\xAA8\x10A\x108\x107" L"Festival\x1\x1"
-        >(original);
+            L".\x10A\x108\x10A\x8103\xB71\x101\x100\x1\x1", L"\xA85\x10A\xA4E\x1\x101\x114\x2\xAA8\x10A\x108\x107"
+                                                            L"Festival\x1\x1">(original);
 
         // Check for customized item with +20% damage
         static constexpr ctll::fixed_string dmg_plus_20_pattern = L"\x2\x102\x2.\x10A\xA85\x10A[\xA4C\xA4E]\x1\x101\x114\x1";
         if (item->customized && ctre::search<dmg_plus_20_pattern>(original)) {
             // Remove "\nDamage +20%" > "\n"
             original = TextUtils::ctre_regex_replace<dmg_plus_20_pattern, L"">(original);
-            // Append "Customized"
-            original += L"\x2\x102\x2\x108\x107" L"Customized\x1";
+            original += L"\x2\x102\x2\x108\x107"
+                        L"Customized\x1";
         }
 
         return original;
     }
-}
+
+    GuiUtils::EncString* GetProfessionName(const GW::Constants::Profession profession)
+    {
+        const auto idx = static_cast<size_t>(profession);
+        const auto str_id = idx < std::size(GW::EncStrings::Profession) ? GW::EncStrings::Profession[idx] : 1u;
+        return Resources::DecodeStringId(str_id);
+    }
+
+    GuiUtils::EncString* GetProfessionAcronym(const GW::Constants::Profession profession)
+    {
+        const auto idx = static_cast<size_t>(profession);
+        const auto str_id = idx < std::size(GW::EncStrings::ProfessionAcronym) ? GW::EncStrings::ProfessionAcronym[idx] : 1u;
+        return Resources::DecodeStringId(str_id);
+    }
+} // namespace ToolboxUtils

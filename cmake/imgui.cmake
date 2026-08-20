@@ -1,31 +1,30 @@
 include_guard()
 include(FetchContent)
 
+# apply_patch.bat can't run directly when configuring from a non-Windows host (e.g. the
+# wine cross-compile toolchain in scripts/build-wine-prefix.sh); use the POSIX equivalent there.
+if(CMAKE_HOST_WIN32)
+    set(_IMGUI_PATCH_COMMAND "${CMAKE_CURRENT_LIST_DIR}/patches/apply_patch.bat")
+else()
+    set(_IMGUI_PATCH_COMMAND sh "${CMAKE_CURRENT_LIST_DIR}/patches/apply_patch.sh")
+endif()
+
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG v1.90.9-docking
+    GIT_TAG v1.92.7-docking
+    PATCH_COMMAND ${_IMGUI_PATCH_COMMAND} imgui_transparent_viewports.patch
+    LOG_PATCH true
+    LOG_MERGED_STDOUTERR true
+    LOG_OUTPUT_ON_FAILURE true
     )
+unset(_IMGUI_PATCH_COMMAND)
 FetchContent_GetProperties(imgui)
 if (imgui_POPULATED)
     return()
 endif()
 
 FetchContent_MakeAvailable(imgui)
-
-# Apply the patch without halting the build on failure, in case it's already applied
-execute_process(
-    COMMAND git apply "${CMAKE_CURRENT_LIST_DIR}/../cmake/patches/imgui_transparent_viewports.patch"
-    WORKING_DIRECTORY ${imgui_SOURCE_DIR}
-    RESULT_VARIABLE patch_result
-    ERROR_VARIABLE patch_error
-    OUTPUT_VARIABLE patch_output
-)
-
-if (NOT patch_result EQUAL 0)
-    message(WARNING "Failed to apply patch: ${patch_error}")
-    message(WARNING "Patch output: ${patch_output}")
-endif()
 
 add_library(imgui)
 set(SOURCES
@@ -39,13 +38,38 @@ set(SOURCES
     # we copied (and modified) impl_imgui_dx9.h/cpp files under GWToolboxdll
     # we copied (and modified) imgui_impl_win32.h/cpp files under GWToolboxdll
 )
+if(EMSCRIPTEN)
+    # Stock backend, unmodified (unlike the D3D9/Win32 pair above): the GLES3 surface
+    # gw_in_browser's loader wires up (harness/gllib.js) is real WebGL2, so this needs
+    # no wasm-specific changes -- see GWToolboxdll/Wasm/main_wasm.cpp.
+    list(APPEND SOURCES
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.h"
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp"
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3_loader.h"
+    )
+endif()
+set(HOOK_SOURCES
+    "${CMAKE_CURRENT_LIST_DIR}/../Dependencies/imgui_test_engine_hooks/imgui_test_engine_hooks.h"
+    "${CMAKE_CURRENT_LIST_DIR}/../Dependencies/imgui_test_engine_hooks/imgui_test_engine_hooks.cpp"
+)
 source_group(TREE "${imgui_SOURCE_DIR}" FILES ${SOURCES})
-target_sources(imgui PRIVATE ${SOURCES})
+target_sources(imgui PRIVATE ${SOURCES} ${HOOK_SOURCES})
 target_include_directories(imgui PUBLIC
     "${CMAKE_CURRENT_LIST_DIR}/../Dependencies"
     "${imgui_SOURCE_DIR}"
+    "${imgui_SOURCE_DIR}/backends"
 	)
-target_compile_definitions(imgui PUBLIC 
+target_compile_definitions(imgui PUBLIC
     IMGUI_USER_CONFIG="${CMAKE_CURRENT_LIST_DIR}/../GWToolboxdll/imconfig.h")
+if(EMSCRIPTEN)
+    target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES3)
+    # imconfig.h (IMGUI_USER_CONFIG above) includes GWCA/stdafx.h, which branches on
+    # this to pick Win32Shim.h over real Windows.h -- needed here too, not just on
+    # GWToolboxdll, since imgui.cpp itself is compiled against imconfig.h.
+    target_compile_definitions(imgui PUBLIC GWCA_WASM=1)
+    target_include_directories(imgui PUBLIC
+        "${CMAKE_CURRENT_LIST_DIR}/../Dependencies/GWCA/include"
+        "${CMAKE_CURRENT_LIST_DIR}/../Dependencies/GWCA/source")
+endif()
 
-set_target_properties(imgui PROPERTIES FOLDER "${CMAKE_CURRENT_LIST_DIR}/../Dependencies/")
+set_target_properties(imgui PROPERTIES FOLDER "Dependencies/")

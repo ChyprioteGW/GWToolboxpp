@@ -1,7 +1,5 @@
 #pragma once
 #include <cstdint>
-#include <memory>
-#include <string>
 #include <vector>
 
 // ArenaNet File Format (FFNA) Parser
@@ -219,12 +217,10 @@ enum class ChunkType : uint32_t {
         uint32_t unk;
         uint32_t num_filenames;
         FileName filenames[];
-        // FileName array follows...
     };
     struct FileNamesChunkWithoutLength : Chunk {
         FileName filenames[];
         size_t num_filenames() { return chunk_size / sizeof(FileName); };
-        // FileName array follows...
     };
     struct ChunkFA1 : Chunk {
         ChunkFA1Sub1 sub_1;
@@ -239,13 +235,11 @@ enum class ChunkType : uint32_t {
     #pragma warning(pop)
     struct GameAssetFile {
         std::vector<uint8_t> data; // Reference to the original data
-        size_t data_size;          // Size of the data
-        GameAssetFile() {
-            data.clear();
-            data_size = 0;
-        }
-        GameAssetFile(std::vector<uint8_t>& _data) : GameAssetFile() { parse(_data); }
-        char* fileType();
+        size_t data_size = 0;          // Size of the data
+        uint32_t file_id = 0;
+        GameAssetFile() = default;
+        GameAssetFile(std::vector<uint8_t>& _data) { parse(_data); }
+        const char* fileType() const;
 
         virtual bool parse(std::vector<uint8_t>& _data);
 
@@ -256,14 +250,12 @@ enum class ChunkType : uint32_t {
 
     struct ArenaNetFile : GameAssetFile {
 
-        // Copy parent constructors
         ArenaNetFile() : GameAssetFile() {}
         ArenaNetFile(std::vector<uint8_t>& _data) : ArenaNetFile() { parse(_data); }
 
         const uint8_t getFFNAType() const;
 
         const bool isValid() override;
-        // Get chunk by type
         const Chunk* FindChunk(ChunkType chunk_type);
     };
 

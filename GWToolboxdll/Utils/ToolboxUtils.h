@@ -1,6 +1,7 @@
 #pragma once
 #include <GWCA/Managers/UIMgr.h>
 #include <GWCA/Managers/StoCMgr.h>
+#include <GWCA/GameEntities/Attribute.h>
 
 class StoCCallback {
     GW::HookEntry* hook_entry = nullptr;
@@ -46,8 +47,13 @@ namespace GW {
     enum class FriendStatus : uint32_t;
 
     namespace Constants {
+        enum HeroID : uint32_t;
+        enum class Profession : uint32_t;
+        enum class Campaign : uint32_t;
+        enum class MapID : uint32_t;
         enum class SkillID : uint32_t;
         enum class TitleID : uint32_t;
+        enum class MaterialSlot : uint32_t;
         // Blunt, Piercing, Slashing, Cold, Lightning, Fire, Chaos, Dark, Holy, Nature, Sacrifice, Earth, Generic, Dark
         enum class DamageType : uint8_t {
             Blunt,
@@ -97,18 +103,18 @@ namespace GW {
             return static_cast<GW::Constants::MapID>((props[0] >> 16) & 0xffff);
         }
 
-        uint32_t primary() const
-        {
-            return ((props[2] >> 20) & 0xf);
+        GW::Constants::Profession primary() const
+        { 
+            return (GW::Constants::Profession)((props[2] >> 20) & 0xf);
         }
-        uint32_t secondary() const
+        GW::Constants::Profession secondary() const
         {
-            return ((props[7] >> 10) & 0xf);
+            return (GW::Constants::Profession)((props[7] >> 10) & 0xf);
         }
 
-        uint32_t campaign() const
+        GW::Constants::Campaign campaign() const
         {
-            return (props[7] & 0xf);
+            return (GW::Constants::Campaign)(props[7] & 0xf);
         }
 
         uint32_t level() const
@@ -120,6 +126,18 @@ namespace GW {
         {
             return ((props[7] >> 9) & 0x1) == 0x1;
         }
+
+        // Returns true if character is on the Melandru's Accord server.
+        // Mirrors the reforged_or_dhuums_flags & 0x2 check used for in-game players.
+        bool is_melandrus_accord() const { 
+            return ((props[7] >> 17) & 0x1) == 0x1; 
+        }
+        bool is_reforged() const {
+            return ((props[7] >> 16) & 0x1) == 0x1; 
+        }
+        bool is_dhuums_covenant() const { 
+            return ((props[7] >> 15) & 0x1) == 0x1; 
+        }
     };
     static_assert(sizeof(AvailableCharacterInfo) == 0x84);
 
@@ -128,11 +146,22 @@ namespace GW {
     namespace Map {
         GW::Array<GW::MapProp*>* GetMapProps();
         bool GetMapWorldMapBounds(GW::AreaInfo* map, ImRect* out);
-        std::vector<GW::Constants::TitleID> GetBountyTitlesForMap(GW::Constants::MapID map_id);
+        bool HasMapDisplayInfo(const GW::AreaInfo* map_info);
+        bool IsExcludedMapInfo(const GW::AreaInfo* map_info);
+        std::vector<GW::Constants::TitleID> GetTitlesForMap(GW::Constants::MapID map_id);
         GW::Constants::TitleID GetTitleForMap(GW::Constants::MapID map_id);
 
+        bool IsFestivalOutpost(const GW::Constants::MapID map_id);
+
         void PingCompass(const GW::GamePos& position);
+
+        bool IsPreSearing(const GW::Constants::MapID map_id = (GW::Constants::MapID)0);
     } // namespace Map
+
+    namespace SkillbarMgr {
+        GW::Attribute* GetPlayerAttribute(GW::Constants::Attribute);
+
+    }
     namespace LoginMgr {
         const bool IsCharSelectReady();
         const bool SelectCharacterToPlay(const wchar_t* name, bool play = true);
@@ -154,21 +183,38 @@ namespace GW {
         // Try not to be a dick with this info
         const wchar_t* GetAccountEmail();
         const UUID* GetPortalAccountUuid();
+        GUID GetAccountUuid();
 
         AvailableCharacterInfo* GetAvailableCharacter(const wchar_t* name);
     }
     namespace MemoryMgr {
+        template <typename T>
+        T* AddToGuildWarsArray(GW::BaseArray<T>& arr, const T& element);
+        template <typename T>
+        void RemoveFromGwArray(GW::BaseArray<T>& arr, uint32_t index);
         bool GetPersonalDir(std::wstring& out);
+        std::filesystem::path GetBuildsDir();
     }
     namespace UI {
         struct Frame;
+        void AsyncDecodeStrS(const wchar_t* enc_str, std::string* out, GW::Constants::Language language_id = (GW::Constants::Language)0xff);
         void AsyncDecodeStr(const wchar_t* enc_str, std::wstring* out, GW::Constants::Language language_id = (GW::Constants::Language)0xff);
         bool BelongsToFrame(GW::UI::Frame* parent, GW::UI::Frame* child);
+        // Walk up the frame hierarchy n levels. Returns null if a parent is missing along the way.
+        GW::UI::Frame* GetNthParentFrame(GW::UI::Frame* frame, uint32_t n);
 
         void Screenshot();
+        bool IsLoadingScreenShown();
+    } // namespace UI
+    namespace PlayerMgr {
+        bool IsMelandrusAccord();
+        GW::GamePos* GetPlayerPosition();
+        // Old title variants the game still exposes but that no longer accrue
+        bool IsDeprecatedTitle(GW::Constants::TitleID title_id);
     }
     namespace Agents {
         bool IsAgentCarryingBundle(uint32_t agent_id);
+        void AsyncGetAgentName(const uint32_t agent_id, std::wstring& out);
         void AsyncGetAgentName(const Agent* agent, std::wstring& out);
     }
     namespace Items {
@@ -179,13 +225,42 @@ namespace GW {
         const char* GetRarityName(const GW::Constants::Rarity rarity);
         const char* GetItemTypeName(const GW::Constants::ItemType item_type);
 
-        uint32_t GetUses(GW::Item* item);
-        uint32_t GetAlcoholPointsPerUse(GW::Item* item);
-        bool IsAlcohol(GW::Item* item);
+        struct MaterialInfo {
+            const wchar_t* enc_name; // for tooltip display
+            int model_id;            // for price lookup
+        };
+
+        const MaterialInfo* GetMaterialInfo(GW::Constants::MaterialSlot slot);
+
+        uint32_t GetUses(const GW::Item* item);
+        uint32_t GetAlcoholPointsPerUse(const GW::Item* item);
+        bool IsAlcohol(const GW::Item* item);
+    }
+    namespace Effects {
+        // Adds a synthetic effect to the local player's effects array and notifies the in-game UI.
+        // Effect ID is deterministic: 0x0f000000 | skill_id, so the same skill always reuses the same slot.
+        // If an existing custom effect for the same skill already exists it is updated instead.
+        // Returns the effect_id on success, 0 on failure (e.g. no capacity in the effects array).
+        uint32_t AddCustomEffect(GW::Constants::SkillID skill_id, float duration_seconds);
+
+        // Removes a previously added custom effect from the local player's effects array and
+        // notifies the in-game UI.  Only removes effects whose effect_id has high byte 0x0f.
+        // Returns true if the effect was found and removed.
+        bool RemoveCustomEffect(uint32_t effect_id);
     }
 }
 
+namespace GuiUtils {
+    class EncString;
+}
+
 namespace ToolboxUtils {
+
+    // Helper function to limit some functions to only check every n frames
+    bool FrameRateCheck(clock_t& last_checked, clock_t target_fps);
+
+    // e.g passing 200 would return the encoded string for "3 minutes"
+    std::wstring TimeToEncString(clock_t time_in_seconds);
 
     bool ArrayBoolAt(const GW::Array<uint32_t>&, uint32_t);
     // Map
@@ -230,6 +305,8 @@ namespace ToolboxUtils {
     bool IsHenchman(uint32_t agent_id);
     bool IsHero(uint32_t agent_id, GW::HeroInfo** info_out = nullptr);
 
+    bool IsHeroUnlocked(GW::Constants::HeroID hero_id);
+
     // Party related
 
     // Find HenchmanPartyMember by agent_id, pass GW::PartyInfo** to also grab the party this henchman belongs to
@@ -242,6 +319,8 @@ namespace ToolboxUtils {
     const GW::PlayerPartyMember* GetPlayerPartyMember(uint32_t, GW::PartyInfo** = nullptr);
     bool IsPlayerInParty(uint32_t);
     bool IsAgentInParty(uint32_t);
+    bool IsAgentInOtherParty(uint32_t);
+    bool IsAgentInMyParty(uint32_t);
 
     // Skills
 
@@ -252,4 +331,7 @@ namespace ToolboxUtils {
     GW::Friend* GetFriend(const wchar_t* account, const wchar_t* playing, GW::FriendType type, GW::FriendStatus status);
 
     std::wstring ShorthandItemDescription(GW::Item* item);
+
+    GuiUtils::EncString* GetProfessionName(GW::Constants::Profession profession);
+    GuiUtils::EncString* GetProfessionAcronym(GW::Constants::Profession profession);
 };

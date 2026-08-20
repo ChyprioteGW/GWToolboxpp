@@ -40,9 +40,17 @@ namespace GW {
         GWCA_API GW::ButtonFrame* GetTabButton(GW::UI::Frame* tab_frame);
 
     };
+    // Sorting handler is actually a boolean function - return "1" if frame_id_1 needs to be bubbled higher than frame_id_2
+    typedef int(__cdecl* SortHandler_pt)(uint32_t frame_id_1, uint32_t frame_id_2);
+    struct ItemListFrame : UI::Frame {
+        // Returns false if the request failed, or nothing is selected
+        GWCA_API bool GetSelectedValue(uint32_t* selected_value);
+        GWCA_API bool SetSortHandler(SortHandler_pt sortHandler);
+        GWCA_API SortHandler_pt GetSortHandler();
+    };
+
     struct ScrollableFrame : UI::Frame {
-        // Sorting handler is actually a boolean function - return "1" if frame_id_1 needs to be bubbled higher than frame_id_2
-        typedef int(__cdecl* SortHandler_pt)(uint32_t frame_id_1, uint32_t frame_id_2);
+
         // Scrollable frame always has an "inner" page that handles the content. Only really need to mess with this if you're doing something odd.
         struct ScrollablePageContext {
             uint32_t flags;
@@ -57,23 +65,21 @@ namespace GW {
         GWCA_API SortHandler_pt GetSortHandler();
         GWCA_API bool ClearItems();
         GWCA_API bool RemoveItem(uint32_t child_offset_id);
-        GWCA_API bool AddItem(uint32_t flags, uint32_t child_offset_id, GW::UI::UIInteractionCallback callback);
+        // Returns the frame_id of the added item's frame, or 0 on failure.
+        GWCA_API uint32_t AddItem(uint32_t flags, uint32_t child_offset_id, GW::UI::UIInteractionCallback callback);
         GWCA_API uint32_t GetItemFrameId(uint32_t child_offset_id);
-        // Returns false if the request failed, or nothing is selected
         GWCA_API bool GetSelectedValue(uint32_t* selected_value);
-        GWCA_API uint32_t GetFirstChildFrameId(uint32_t* _offset_of_child_out = nullptr);
-        GWCA_API uint32_t GetNextChildFrameId(uint32_t _frame_id, uint32_t* _offset_of_child_out = nullptr);
-        GWCA_API uint32_t GetLastChildFrameId(uint32_t* _offset_of_child_out = nullptr);
-        GWCA_API uint32_t GetPrevChildFrameId(uint32_t _frame_id, uint32_t* _offset_of_child_out = nullptr);
-        GWCA_API bool GetItemRect(uint32_t child_offset_id, float rect[4]);
+
         // This is actually the child_frame_id of the last child in the list - things that use sorting, or the child id to identify the frame, will not represent the size.
         GWCA_API bool GetCount(uint32_t* size);
         GWCA_API uint32_t GetItems(uint32_t* child_frame_id_buffer = nullptr, uint32_t buffer_len = 0);
         
-        GWCA_API GW::UI::Frame* GetPage();
+        GWCA_API GW::ItemListFrame* GetPage();
         // Scrollable frame always has an "inner" page that handles the content. Only really need to mess with this if you're doing something odd.
-        GWCA_API GW::UI::Frame* SetPage(ScrollablePageContext*);
+        GWCA_API GW::ItemListFrame* SetPage(ScrollablePageContext*);
     };
+
+
 
 
     struct FrameWithValue {
@@ -84,8 +90,9 @@ namespace GW {
         FrameWithValue& operator=(const FrameWithValue&) = default;
         FrameWithValue& operator=(FrameWithValue&&) = default;
 
-        virtual uint32_t GetValue();
-        virtual bool SetValue(uint32_t value);
+        // Pure virtual: GCC's Itanium ABI needs a key function to emit the vtable, and every concrete use is via an overriding subclass.
+        virtual uint32_t GetValue() = 0;
+        virtual bool SetValue(uint32_t value) = 0;
     };
 
     struct EditableTextFrame : UI::Frame {
@@ -150,6 +157,7 @@ namespace GW {
         GWCA_API const wchar_t* GetEncodedLabel();
         GWCA_API const wchar_t* GetDecodedLabel();
         GWCA_API bool SetLabel(const wchar_t* enc_string);
+        GWCA_API bool SetFont(uint32_t);
     };
     struct MultiLineTextLabelFrame final : TextLabelFrame {
         GWCA_API const wchar_t* GetEncodedLabel();

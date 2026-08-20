@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+#include <share.h> // _SH_DENYWR for _wfsopen (shared-read log.txt in Debug)
+
 #include <GWCA/Utilities/Debug.h>
 #include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Managers/GameThreadMgr.h>
@@ -10,9 +12,14 @@
 // ReSharper disable once CppUnusedIncludeDirective
 #include <Modules/Resources.h>
 #include <Utils/TextUtils.h>
+#include <GWCA/Utilities/Hooker.h>
+#include <GWCA/Utilities/Scanner.h>
+
+#include <Defines.h>
 
 namespace {
     FILE* logfile = nullptr;
+    FILE* logfile2 = nullptr; // Debug: a second sink (log.txt on disk) so the harness can read it while the console stays
     [[maybe_unused]] FILE* stdout_file = nullptr;
     [[maybe_unused]] FILE* stderr_file = nullptr;
 
@@ -25,6 +32,91 @@ namespace {
     [[maybe_unused]] bool crash_dumped = false;
 
     bool log_transient = false;
+
+    
+// === Game chat logging ===
+    void _chatlog(const LogType log_type, const wchar_t* message)
+    {
+        uint32_t color;
+        switch (log_type) {
+            case LogType_Error:
+                color = GWTOOLBOX_ERROR_COL;
+                break;
+            case LogType_Warning:
+                color = GWTOOLBOX_WARNING_COL;
+                break;
+            default:
+                color = GWTOOLBOX_INFO_COL;
+                break;
+        }
+        auto to_send = new std::wstring();
+        to_send->assign(std::format(L"<a=1>{}</a><c=#{:X}>: <quote>{}", GWTOOLBOX_SENDER, color, message));
+
+        GW::GameThread::Enqueue([to_send, add_to_log = log_transient] {
+            WriteChat(GWTOOLBOX_CHAN, to_send->c_str(), nullptr, add_to_log);
+            delete to_send;
+        });
+
+        const wchar_t* c = [](const LogType log_type) -> const wchar_t* {
+            switch (log_type) {
+                case LogType_Info:
+                    return L"Info";
+                case LogType_Warning:
+                    return L"Warning";
+                case LogType_Error:
+                    return L"Error";
+                default:
+                    return L"";
+            }
+        }(log_type);
+        Log::LogW(L"[%s] %s\n", c, message);
+    }
+
+    void _vchatlogW(const LogType log_type, const wchar_t* format, const va_list argv)
+    {
+        const std::wstring buf = TextUtils::VStrPrintfW(format, argv);
+        if (!buf.empty()) _chatlog(log_type, buf.c_str());
+    }
+
+    void _vchatlog(const LogType log_type, const char* format, const va_list argv)
+    {
+        const std::string buf = TextUtils::VStrPrintf(format, argv);
+        if (!buf.empty()) _chatlog(log_type, TextUtils::StringToWString(buf).c_str());
+    }
+    void PrintTimestamp()
+    {
+        if (!logfile && !logfile2) return;
+        const auto now = std::chrono::floor<std::chrono::milliseconds>(std::chrono::system_clock::now());
+        const auto ms = now.time_since_epoch().count() % 1000;
+        const std::string ts = TextUtils::TimeToString(std::chrono::system_clock::to_time_t(now), true, static_cast<int>(ms));
+        if (logfile) fprintf(logfile, "[%s] ", ts.c_str());
+        if (logfile2) fprintf(logfile2, "[%s] ", ts.c_str());
+    }
+
+
+    typedef void(__cdecl* LogWithArguments_pt)(uint32_t severity, const wchar_t* format, va_list argList);
+    LogWithArguments_pt LogWithArguments_Func = 0,LogWithArguments_Ret = 0;
+
+    void OnLogWithArguments(uint32_t severity, const wchar_t* format, va_list argList)
+    {
+        GW::Hook::EnterHook();
+        if (format && !wcsstr(format, L"Invalid tag name")) {
+            vfwprintf(logfile, format, argList);
+        }
+        LogWithArguments_Ret(severity, format, argList);
+        GW::Hook::LeaveHook();
+    }
+
+    void HookGWLogger() {
+        if (LogWithArguments_Func) return;
+        LogWithArguments_Func = (LogWithArguments_pt)GW::Scanner::ToFunctionStart(GW::Scanner::FindAssertion("Log.cpp", "argListPtr", 0, 0));
+        DEBUG_ASSERT(LogWithArguments_Func);
+        if (!LogWithArguments_Func) return;
+        GW::Hook::CreateHook((void**)&LogWithArguments_Func, OnLogWithArguments, (void**)&LogWithArguments_Ret);
+        GW::Hook::EnableHooks(LogWithArguments_Func);
+
+    }
+
 }
 
 static void GWCALogHandler(
@@ -73,6 +165,20 @@ bool Log::InitializeLog()
     freopen_s(&stderr_file, "CONOUT$", "w", stderr);
     SetConsoleTitle("GWTB++ Debug Console");
     SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+    // QuickEdit: one stray click puts the console in Select mode, which blocks console writes ->
+    // the game thread wedges on its next Log call until someone presses Esc in the console.
+    if (const HANDLE conin = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr); conin != INVALID_HANDLE_VALUE) {
+        DWORD mode = 0;
+        if (GetConsoleMode(conin, &mode)) {
+            SetConsoleMode(conin, (mode | ENABLE_EXTENDED_FLAGS) & ~ENABLE_QUICK_EDIT_MODE);
+        }
+        CloseHandle(conin);
+    }
+    // Debug also writes to log.txt on disk (the harness reads it), keeping the console as the primary
+    // sink. _wfsopen with _SH_DENYWR allows other processes to READ the file while we hold it open --
+    // _wfopen_s opens it exclusively, which would block the harness host from tailing it.
+    Resources::EnsureFolderExists(Resources::GetComputerFolderPath());
+    logfile2 = _wfsopen(Resources::GetPath(L"log.txt").c_str(), L"w", _SH_DENYWR);
 #else
     Resources::EnsureFolderExists(Resources::GetComputerFolderPath());
     logfile = _wfreopen(Resources::GetPath(L"log.txt").c_str(), L"w", stdout);
@@ -93,6 +199,9 @@ void Log::InitializeChat()
 {
     SetSenderColor(GWTOOLBOX_CHAN, 0xFF000000 | GWTOOLBOX_SENDER_COL);
     SetMessageColor(GWTOOLBOX_CHAN, 0xFF000000 | GWTOOLBOX_INFO_COL);
+    #ifdef _DEBUG
+    HookGWLogger();
+    #endif
 }
 
 void Log::Terminate()
@@ -107,7 +216,10 @@ void Log::Terminate()
     if (stderr_file) {
         fclose(stderr_file);
     }
-
+    if (logfile2) {
+        fflush(logfile2);
+        fclose(logfile2);
+    }
     FreeConsole();
 #else
     if (logfile) {
@@ -116,109 +228,50 @@ void Log::Terminate()
     }
 #endif
     logfile = nullptr;
+    logfile2 = nullptr;
 }
 
 // === File/console logging ===
-static void PrintTimestamp()
-{
-    time_t rawtime{};
-    time(&rawtime);
 
-    tm timeinfo{};
-    localtime_s(&timeinfo, &rawtime);
-
-    char buffer[16];
-    strftime(buffer, sizeof(buffer), "%H:%M:%S", &timeinfo);
-
-    fprintf(logfile, "[%s] ", buffer);
-}
 
 void Log::Log(const char* msg, ...)
 {
-    if (!logfile) {
+    if (!logfile && !logfile2) {
         return;
     }
     PrintTimestamp();
-
-    va_list args;
-    va_start(args, msg);
-    vfprintf(logfile, msg, args);
-    va_end(args);
-    if (msg[strlen(msg) - 1] != '\n') {
-        fprintf(logfile, "\n");
+    const bool nl = msg[strlen(msg) - 1] != '\n';
+    if (logfile) {
+        va_list args; va_start(args, msg); vfprintf(logfile, msg, args); va_end(args);
+        if (nl) fprintf(logfile, "\n");
+    }
+    if (logfile2) {
+        va_list args; va_start(args, msg); vfprintf(logfile2, msg, args); va_end(args);
+        if (nl) fprintf(logfile2, "\n");
     }
 }
 
 void Log::LogW(const wchar_t* msg, ...)
 {
-    if (!logfile) {
+    if (!logfile && !logfile2) {
         return;
     }
     PrintTimestamp();
-
-    va_list args;
-    va_start(args, msg);
-    vfwprintf(logfile, msg, args);
-    va_end(args);
-    if (msg[wcslen(msg) - 1] != '\n') {
-        fprintf(logfile, "\n");
+    const bool nl = msg[wcslen(msg) - 1] != '\n';
+    if (logfile) {
+        va_list args; va_start(args, msg); vfwprintf(logfile, msg, args); va_end(args);
+        if (nl) fprintf(logfile, "\n");
+    }
+    if (logfile2) {
+        va_list args; va_start(args, msg); vfwprintf(logfile2, msg, args); va_end(args);
+        if (nl) fprintf(logfile2, "\n");
     }
 }
 
-// === Game chat logging ===
-static void _chatlog(const LogType log_type, const wchar_t* message)
+void Log::FlushFile()
 {
-    uint32_t color;
-    switch (log_type) {
-        case LogType_Error:
-            color = GWTOOLBOX_ERROR_COL;
-            break;
-        case LogType_Warning:
-            color = GWTOOLBOX_WARNING_COL;
-            break;
-        default:
-            color = GWTOOLBOX_INFO_COL;
-            break;
-    }
-    const size_t len = 5 + wcslen(GWTOOLBOX_SENDER) + 4 + 13 + wcslen(message) + 4 + 1;
-    auto to_send = new wchar_t[len];
-    ASSERT(swprintf(to_send, len, L"<a=1>%s</a><c=#%6X>: %s</c>", GWTOOLBOX_SENDER, color, message) != -1);
-
-    GW::GameThread::Enqueue([to_send, add_to_log = log_transient] {
-        WriteChat(GWTOOLBOX_CHAN, to_send, nullptr, add_to_log);
-        delete[] to_send;
-    });
-
-    const wchar_t* c = [](const LogType log_type) -> const wchar_t* {
-        switch (log_type) {
-            case LogType_Info:
-                return L"Info";
-            case LogType_Warning:
-                return L"Warning";
-            case LogType_Error:
-                return L"Error";
-            default:
-                return L"";
-        }
-    }(log_type);
-    Log::LogW(L"[%s] %s\n", c, message);
-}
-
-static void _vchatlogW(const LogType log_type, const wchar_t* format, const va_list argv)
-{
-    wchar_t buf1[512];
-    vswprintf(buf1, 512, format, argv);
-    _chatlog(log_type, buf1);
-}
-
-static void _vchatlog(const LogType log_type, const char* format, const va_list argv)
-{
-    const size_t len = vsnprintf(nullptr, 0, format, argv);
-    const auto buf = new char[len + 1];
-    vsnprintf(buf, len + 1, format, argv);
-    const std::wstring sbuf2 = TextUtils::StringToWString(buf);
-    delete[] buf;
-    _chatlog(log_type, sbuf2.c_str());
+    if (logfile) fflush(logfile);
+    if (logfile2) fflush(logfile2);
 }
 
 void Log::Flash(const char* format, ...)

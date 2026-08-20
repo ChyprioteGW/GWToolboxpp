@@ -1,5 +1,5 @@
 
-FILE(GLOB SOURCES
+FILE(GLOB SOURCES CONFIGURE_DEPENDS
     "*.h"
     "*.cpp"
     "GWToolbox.rc")
@@ -19,11 +19,25 @@ set_target_properties(GWToolbox PROPERTIES
 
 target_link_libraries(GWToolbox PRIVATE
     # cmake dependencies:
-    GWToolboxdll
     Core
     RestClient
-    directxtex
-    nlohmann_json::nlohmann_json
+    glaze::glaze
 
     version.lib # for GetFileVersionInfo
+    bcrypt.lib # for sha256 of the launcher exe
+    comctl32.lib # for TaskDialogIndirect (Defender prompt checkbox)
     )
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+# GWToolbox.exe is a multi-config (VS) build, so it lands in a per-config
+# folder like bin/RelWithDebInfo/ -- but the wasm build (a separate
+# single-config Emscripten tree) only ever writes gwtoolbox.gwmod to bin/
+# itself. /localdll looks next to the exe, so without this a RelWithDebInfo
+# (or any non-Release) dev build never finds it. See tools/sync_gwmod.py.
+add_custom_command(TARGET GWToolbox POST_BUILD
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/sync_gwmod.py"
+            native-build "${PROJECT_SOURCE_DIR}" "$<TARGET_FILE_DIR:GWToolbox>" "$<CONFIG>"
+    COMMENT "syncing gwtoolbox.gwmod ($<CONFIG>) for $<TARGET_FILE_DIR:GWToolbox>"
+    VERBATIM
+)

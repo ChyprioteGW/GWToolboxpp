@@ -4,7 +4,8 @@
 
 #include <GWCA/GameContainers/GamePos.h>
 
-#include <Widgets/Minimap/VBuffer.h>
+#include <D3DContainers.h>
+
 
 namespace GW {
     struct Agent;
@@ -14,11 +15,17 @@ namespace GW {
     namespace UI {
         enum class UIMessage : uint32_t;
     }
+    namespace Constants {
+        enum class Allegiance : uint8_t;
+    }
 }
 
 using Color = uint32_t;
 
-class AgentRenderer : public VBuffer {
+class ToolboxModule;
+
+class AgentRenderer : public D3DVertexBuffer {
+    friend class Minimap;
     static constexpr int num_triangles = 32;
 
 public:
@@ -30,8 +37,7 @@ public:
     void Render(IDirect3DDevice9* device) override;
 
     void DrawSettings();
-    void LoadSettings(const ToolboxIni* ini, const char* section);
-    void SaveSettings(ToolboxIni* ini, const char* section) const;
+    void RegisterSettings(ToolboxModule* module);
     void LoadCustomAgents();
     void SaveCustomAgents() const;
 
@@ -40,11 +46,14 @@ public:
 
     bool show_hidden_npcs = false;
     bool show_quest_npcs_on_minimap = false;
-    bool boss_colors = true;
+    bool enemies_colors_by_profession = true;
+    bool only_color_bosses = true;
     float agent_border_thickness = 0.f;
     float target_border_thickness = 50.f;
 
     uint32_t auto_target_id = 0;
+
+    DWORD last_check = 0;
 
 private:
     static AgentRenderer* instance;
@@ -63,6 +72,11 @@ private:
         CircleCenter // alpha -50
     };
 
+    enum CombatState { InCombat, NotInCombat, EitherCombat };
+    enum WeaponState { HasWeapon, NoWeapon, EitherWeapon };
+    enum DeadState { Dead, Alive, EitherDeadState };
+    enum QuestState { QuestGiver, NotQuestGiver, EitherQuestState };
+
     class CustomAgent {
         static unsigned int cur_ui_id;
 
@@ -75,12 +89,36 @@ private:
             ModelIdChange
         };
 
+        // glaze-serialized mirror of the persisted fields (AgentColors.json)
+        struct Settings {
+            bool active = true;
+            std::string name;
+            std::string group;
+            DWORD modelId = 0;
+            DWORD mapId = 0;
+            int combat_state = EitherCombat;
+            int weapon_state = EitherWeapon;
+            int allegiance = -1; // -1 == match by modelId only; otherwise a GW::Constants::Allegiance value
+            int dead_state = EitherDeadState;
+            int quest_state = EitherQuestState;
+            bool is_default = false; // seeded from the old fixed agent-color/size categories; can't be deleted
+            Colors::SettingColor color = 0xFFF00000;
+            Colors::SettingColor color_text = 0xFFF00000;
+            int shape = Tear;
+            float size = 0.0f;
+            bool color_active = true;
+            bool color_text_active = false;
+            bool shape_active = true;
+            bool size_active = false;
+        };
+
         CustomAgent(const ToolboxIni* ini, const char* section);
+        explicit CustomAgent(const Settings& settings);
         CustomAgent(DWORD model_id, Color _color, const char* _name);
 
         bool DrawHeader();
         bool DrawSettings(Operation& op);
-        void SaveSettings(ToolboxIni* ini, const char* section) const;
+        [[nodiscard]] Settings ToSettings() const;
 
         // utility
         const unsigned int ui_id = 0; // to ensure UI consistency
@@ -89,8 +127,15 @@ private:
         // define the agent
         bool active = true;
         char name[128]{};
+        char group[64]{};
         DWORD modelId = 0;
         DWORD mapId = 0; // 0 for 'any map'
+        CombatState combat_state = CombatState::EitherCombat;
+        WeaponState weapon_state = WeaponState::EitherWeapon;
+        int allegiance = -1; // -1 == match by modelId only
+        DeadState dead_state = DeadState::EitherDeadState;
+        QuestState quest_state = QuestState::EitherQuestState;
+        bool is_default = false;
 
         // attributes to change
         Color color = 0xFFF00000;
@@ -123,6 +168,11 @@ private:
     Color GetColor(const GW::Agent* agent, const CustomAgent* ca = nullptr) const;
     float GetSize(const GW::Agent* agent, const CustomAgent* ca = nullptr) const;
     Shape_e GetShape(const GW::Agent* agent, const CustomAgent* ca = nullptr) const;
+    // Real players never go through GetCustomAgentsToDraw (see Render()), so the seeded
+    // Neutral/Ally/.../Minion default rows only reach them through this fallback; read the
+    // row's current size instead of the (now write-only) legacy size_* field so editing the
+    // row in the Custom Agents list actually takes effect for players too.
+    float GetSeededDefaultSize(GW::Constants::Allegiance allegiance, float fallback) const;
 
     struct RenderPosition {
         float rotation_cos;
@@ -137,32 +187,31 @@ private:
 
     std::vector<const CustomAgent*>* GetCustomAgentsToDraw(const GW::Agent* agent);
 
-    D3DVertex* vertices = nullptr;    // vertices array
-    unsigned int vertices_count = 0;  // count of vertices
-    unsigned int vertices_max = 0;    // max number of vertices to draw in one call
-    unsigned int max_shape_verts = 0; // max number of triangles in a single shape
 
-    Color color_agent_modifier = 0;
-    Color color_agent_damaged_modifier = 0;
-    Color color_eoe = 0;
-    Color color_qz = 0;
-    Color color_winnowing = 0;
-    Color color_frozen_soil = 0;
-    Color color_target = 0;
-    Color color_player = 0;
-    Color color_player_dead = 0;
-    Color color_signpost = 0;
-    Color color_item = 0;
-    Color color_hostile = 0;
-    Color color_hostile_dead = 0;
-    Color color_neutral = 0;
-    Color color_ally = 0;
-    Color color_ally_npc = 0;
-    Color color_ally_npc_quest = 0;
-    Color color_ally_spirit = 0;
-    Color color_ally_minion = 0;
-    Color color_ally_dead = 0;
-    Color color_marked_target = 0;
+    Color color_agent_modifier = 0x001E1E1E;
+    Color color_agent_damaged_modifier = 0x00505050;
+    Color color_eoe = 0x3200FF00;
+    Color color_qz = 0x320000FF;
+    Color color_winnowing = 0x3200FFFF;
+    Color color_frozen_soil = 0x00FEFFFF;
+    Color color_symbiosis = 0x00FF00FF;
+    Color color_target = 0xFFFFFF00;
+    Color color_player = 0xFFFF8000;
+    Color color_player_dead = 0x64FF8000;
+    Color color_signpost = 0xFF0000C8;
+    Color color_locked_chest = 0xFF0000C8;
+    Color color_locked_chest_open = 0xFF0000C8;
+    Color color_item = 0xFF0000F0;
+    Color color_hostile = 0xFFF00000;
+    Color color_hostile_dead = 0xFF320000;
+    Color color_neutral = 0xFF0000DC;
+    Color color_ally = 0xFF00B300;
+    Color color_ally_npc = 0xFF99FF99;
+    Color color_ally_npc_quest = 0xFF99FF99;
+    Color color_ally_spirit = 0xFF608000;
+    Color color_ally_minion = 0xFF008060;
+    Color color_ally_dead = 0x64006400;
+    Color color_marked_target = 0xFFFFFC00;
 
     Color profession_colors[11] = {
         0xFF666666,
@@ -180,22 +229,35 @@ private:
 
     std::vector<CustomAgent*> custom_agents{};
     std::unordered_map<DWORD, std::vector<const CustomAgent*>> custom_agents_map{};
+    std::unordered_map<int, std::vector<const CustomAgent*>> custom_agents_by_allegiance{};
     void BuildCustomAgentsMap();
+    void SeedDefaultCustomAgents();
+    void SyncSeededDefaultsFromLegacyFields();
+    bool custom_agent_defaults_seeded = false;
     //const CustomAgent* FindValidCustomAgent(DWORD modelid) const;
 
-    float size_default = 75.f;
+    float size_default = 100.f;
     float size_player = 100.f;
     float size_signpost = 50.f;
+    float size_locked_chest = 50.f;
+    float size_locked_chest_open = 50.f;
     float size_item = 25.f;
     float size_boss = 125.f;
     float size_minion = 50.f;
-    float size_marked_target = 75.f;
+    float size_marked_target = 100.f;
+    float size_hostile = 100.f;
+    float size_neutral = 100.f;
+    float size_ally = 100.f;
+    float size_ally_npc = 100.f;
+    float size_ally_npc_quest = 100.f;
+    float size_ally_spirit = 100.f;
+    bool marked_target_inherit_custom_agents = false;
     Shape_e default_shape = Tear;
     Shape_e shape_player = Tear;
     Shape_e shape_players = Tear;
 
     bool agentcolors_changed = false;
-    ToolboxIni* agentcolorinifile = nullptr;
+    bool custom_agents_loaded = false; // guards SaveCustomAgents against clobbering a file that was never read
 
     GW::HookEntry UIMsg_Entry;
     static void OnUIMessage(GW::HookStatus* status, GW::UI::UIMessage msgid, void* wParam, void*);

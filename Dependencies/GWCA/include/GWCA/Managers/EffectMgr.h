@@ -20,9 +20,7 @@ namespace GW {
     extern Module EffectModule;
 
     namespace Effects {
-        // Returns current level of intoxication, 0-5 scale.
-        // If > 0 then skills that benefit from drunk will work.
-        // Important: requires SetupPostProcessingEffectHook() above.
+        // Current intoxication level, 0-5; above 0 makes drunk-benefit skills work. Requires SetupPostProcessingEffectHook().
         GWCA_API uint32_t GetAlcoholLevel();
 
         // Have fun with this ;))))))))))
@@ -58,4 +56,14 @@ namespace GW {
         // Gets Buff struct of Buff on player with SkillID, returns Buff::Nil() if no match.
         GWCA_API Buff *GetPlayerBuffBySkillId(Constants::SkillID skill_id);
     };
+}
+// C Interop API
+extern "C" {
+    GWCA_API uint32_t GetAlcoholLevel();
+    GWCA_API void     GetDrunkAf(float intensity, uint32_t tint);
+    GWCA_API void* GetAgentEffectsArray(uint32_t agent_id);
+    GWCA_API void* GetPlayerEffectsArray();
+    GWCA_API bool     DropBuff(uint32_t buff_id);
+    GWCA_API void* GetPlayerEffectBySkillId(uint32_t skill_id);
+    GWCA_API void* GetPlayerBuffBySkillId(uint32_t skill_id);
 }

@@ -6,6 +6,7 @@
 #include <GWCA/Constants/Constants.h>
 
 #include <GWCA/GameEntities/Item.h>
+#include <GWCA/Utilities/Export.h>
 
 namespace GW {
     typedef uint32_t AgentID;
@@ -18,6 +19,8 @@ namespace GW {
 
     struct Vec3f;
     struct GamePos;
+
+    struct AgentEffect;
 
     struct VisibleEffect {
         uint32_t unk; //enchantment = 1, weapon spell = 9
@@ -88,19 +91,12 @@ namespace GW {
         /* +h0109 */ uint8_t offhand_item_type;     // Offhand item type for stance/animation
         /* +h010A */ uint16_t offhand_item_id;      // Offhand item id for stance/animation
 
-        inline uint32_t GetType() {
-            return vtable->GetType(this);
-        }
-        inline bool RedrawEquipmentSlot(uint32_t slot) {
-            if (!(slot < _countof(items) && items[slot].model_file_id))
-                return false;
-            return vtable->EquipItem(this, 0, slot), true;
-        }
-        inline bool UndrawEquipmentSlot(uint32_t slot) {
-            if (!(slot < _countof(items) && items[slot].model_file_id))
-                return false;
-            return vtable->RemoveItem(this, 0, slot), true;
-        }
+        // These three call through the game's vtable (see Source/Agent.cpp) -- kept
+        // out of line so the wasm table-adoption dance stays an implementation
+        // detail rather than something every caller's translation unit compiles.
+        GWCA_API uint32_t GetType();
+        GWCA_API bool RedrawEquipmentSlot(uint32_t slot);
+        GWCA_API bool UndrawEquipmentSlot(uint32_t slot);
     };
     static_assert(sizeof(NPCEquipment) == 0x10C);
 
@@ -143,6 +139,30 @@ namespace GW {
     struct AgentGadget;
     struct AgentLiving;
 
+	// Bits in GW::Agent::name_properties, which AvAgent.cpp recomputes name tag visibility from.
+	enum NameTagFlags : uint32_t {
+		// In the mouse pick list; cleared wholesale whenever that list is rebuilt.
+		NameTagFlags_Picked = 0x8,
+		// Moused-over agent: underlines the tag, glows the model, draws the selection decal.
+		NameTagFlags_Highlighted = 0x10,
+		// Within name tag draw distance (1500 gwinches from the camera).
+		NameTagFlags_InRange = 0x20,
+		// The evaluated target - manual target, else auto target.
+		NameTagFlags_EvaluatedTarget = 0x80,
+		// The manual target, while a different auto target exists.
+		NameTagFlags_ManualTarget = 0x100,
+		// Name tags globally suppressed (cutscenes, /hideui); refcounted by the client.
+		NameTagFlags_Suppressed = 0x200,
+		// Agent::type passes the persistent filter from the Guild Wars name tag options.
+		NameTagFlags_PassesFilter = 0x400,
+		// Dropped item reserved for another player, so it never gets a distance-based tag.
+		NameTagFlags_NotOwnedByPlayer = 0x800,
+		// Agent::type passes the transient filter, bound to the "show item names" key.
+		NameTagFlags_PassesTransientFilter = 0x1000,
+		// Name tag disabled for this agent regardless of any filter.
+		NameTagFlags_Disabled = 0x20000
+	};
+
     struct Agent {
         /* +h0000 */ uint32_t* vtable;
         /* +h0004 */ uint32_t h0004;
@@ -163,7 +183,7 @@ namespace GW {
         /* +h004C */ float rotation_angle; // Rotation in radians from East (-pi to pi)
         /* +h0050 */ float rotation_cos; // cosine of rotation
         /* +h0054 */ float rotation_sin; // sine of rotation
-        /* +h0058 */ uint32_t name_properties; // Bitmap basically telling what the agent is
+        /* +h0058 */ NameTagFlags name_properties; // Bitmap basically telling what the agent is
         /* +h005C */ uint32_t ground;
         /* +h0060 */ uint32_t h0060;
         /* +h0064 */ Vec3f terrain_normal;
@@ -248,8 +268,8 @@ namespace GW {
         /* +h0104 */ uint32_t h0104; // New variable added here
         /* +h0108 */ TagInfo* tags; // struct { uint16_t guild_id, uint8_t primary, uint8_t secondary, uint16_t level
         /* +h010C */ uint16_t  h010C;
-        /* +h010E */ uint8_t  primary; // Primary profession 0-10 (None,W,R,Mo,N,Me,E,A,Rt,P,D)
-        /* +h010F */ uint8_t  secondary; // Secondary profession 0-10 (None,W,R,Mo,N,Me,E,A,Rt,P,D)
+        /* +h010E */ GW::Constants::ProfessionByte  primary; // Primary profession 0-10 (None,W,R,Mo,N,Me,E,A,Rt,P,D)
+        /* +h010F */ GW::Constants::ProfessionByte  secondary; // Secondary profession 0-10 (None,W,R,Mo,N,Me,E,A,Rt,P,D)
         /* +h0110 */ uint8_t  level; // Duh!
         /* +h0111 */ uint8_t  team_id; // 0=None, 1=Blue, 2=Red, 3=Yellow
         /* +h0112 */ uint8_t  h0112[2];
@@ -265,8 +285,11 @@ namespace GW {
         /* +h0138 */ uint32_t max_hp; // Only works for yourself
         /* +h013C */ uint32_t effects; // Bitmap for effects to display when targetted. DOES include hexes
         /* +h0140 */ uint32_t h0140;
-        /* +h0144 */ uint8_t  hex; // Bitmap for the hex effect when targetted (apparently obsolete!) (yes)
-        /* +h0145 */ uint8_t  h0145[19];
+        /* +h0144 */ uint32_t h0144; 
+        /* +h0148 */ GW::AgentEffect* next_queued_agent_effect; // Points to the next effect that needs to be processed in the update loop for this agent.
+        /* +h014c */ uint32_t h014c;
+        /* +h0150 */ uint32_t h0150;
+        /* +h0154 */ uint32_t h0154;
         /* +h0158 */ uint32_t model_state; // Different values for different states of the model.
         /* +h015C */ uint32_t type_map; // Odd variable! 0x08 = dead, 0xC00 = boss, 0x40000 = spirit, 0x400000 = player
         /* +h0160 */ uint32_t h0160[4];
@@ -291,6 +314,7 @@ namespace GW {
         // Health Bar Effect Bitmasks.
         inline bool GetIsBleeding()        const { return (effects & 0x0001) != 0; }
         inline bool GetIsConditioned()     const { return (effects & 0x0002) != 0; }
+        inline bool GetIsUsedCorpse()      const { return (effects & 0x0004) != 0; }
         inline bool GetIsCrippled()        const { return (effects & 0x000A) == 0xA; }
         inline bool GetIsDead()            const { return (effects & 0x0010) != 0; }
         inline bool GetIsDeepWounded()     const { return (effects & 0x0020) != 0; }
@@ -368,6 +392,25 @@ namespace GW {
         else
             return nullptr;
     }
+    // Stores info about some agents even if they're not in compass range
+    struct AgentCharData {
+        uint16_t h0000;
+        GW::Constants::ProfessionByte primary;
+        GW::Constants::ProfessionByte secondary;
+        uint32_t level;
+        uint32_t h0008;
+        uint32_t h000c;
+        float h0010;
+        float h0014;
+        uint32_t h0018;
+        uint32_t h001c;
+        uint32_t h0020;
+        float h0024;
+        float h0028;
+        uint32_t h002c;
+        uint32_t h0030;
+    };
+    static_assert(sizeof(AgentCharData) == 0x34, "struct AgentCharData has incorrect size");
 
     struct MapAgent {
         /* +h0000 */ float cur_energy;

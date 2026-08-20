@@ -24,8 +24,7 @@ namespace GW {
         /* +h0014 */ GW::Constants::Profession primary;
         /* +h0018 */ GW::Constants::Profession secondary;
         /* +h001C */ uint8_t  default_level;
-        // +h001D    uint8_t  padding;
-        // +h001E    uint16_t padding;
+        // +h001D uint8_t padding; +h001E uint16_t padding;
         /* +h0020 */ wchar_t *name_enc;
         /* +h0024 */ uint32_t *model_files;
         /* +h0028 */ uint32_t files_count; // length of ModelFile
@@ -36,6 +35,7 @@ namespace GW {
         inline bool IsSpirit() { return (npc_flags & 0x4000) != 0; }
         inline bool IsMinion() { return (npc_flags & 0x100) != 0; }
         inline bool IsPet() { return (npc_flags & 0xD) != 0; }
+        inline bool IsFleshy() const { return (npc_flags & 0x8) != 0; }
     };
     static_assert(sizeof(NPC) == 0x30, "struct NPC has incorrect size");
 

@@ -12,6 +12,7 @@
 #include <Modules/Resources.h>
 
 #include "Utils/TextUtils.h"
+#include "Utils/TextUtils_Time.h"
 
 
 namespace {
@@ -19,8 +20,7 @@ namespace {
 
     GroupMode current_group_mode = GroupMode::None;
     const char* group_mode_names[] = {"None", "Item Name", "Map", "Rarity", "Type", "Weapon"};
-    float icon_size = 48;
-    float run_count = 0;
+    DropTrackerWindow::Settings settings;
     
     bool IsWeapon(const ItemDrops::PendingDrop* drop)
     {
@@ -57,8 +57,8 @@ namespace {
 
     void DrawItemIcon(const ItemDrops::PendingDrop* drop)
     {
-        if (icon_size > 0) {
-            ImGui::Image(reinterpret_cast<ImTextureID>(*drop->icon), ImVec2(icon_size, icon_size));
+        if (settings.icon_size > 0) {
+            ImGui::Image((ImTextureID)(intptr_t)*drop->icon, ImVec2(settings.icon_size, settings.icon_size));
         }
     }
 
@@ -76,8 +76,7 @@ namespace {
             ImGui::TableHeadersRow();
 
             for (auto drop : drops) {
-                std::tm tm_buf{};
-                localtime_s(&tm_buf, &drop->system_time);
+                std::tm tm_buf = TextUtils::Time::SafeLocaltime(drop->system_time);
                 char time_str[32];
                 std::strftime(time_str, sizeof(time_str), "%H:%M:%S", &tm_buf);
 
@@ -127,7 +126,6 @@ namespace {
                 // Use the index as the ID, not the string content
                 ImGui::PushID(group_idx++);
 
-                // Use TreeNodeEx with a simple label
                 bool open = ImGui::TreeNodeEx("##tree", ImGuiTreeNodeFlags_SpanAvailWidth, "%s", key.empty() ? "(Unknown)" : key.c_str());
 
                 ImGui::TableNextColumn();
@@ -140,8 +138,7 @@ namespace {
                     for (auto drop : items) {
                         ImGui::PushID(item_idx++); // Unique ID for each sub-item
 
-                        std::tm tm_buf{};
-                        localtime_s(&tm_buf, &drop->system_time);
+                        std::tm tm_buf = TextUtils::Time::SafeLocaltime(drop->system_time);
                         char time_str[32];
                         std::strftime(time_str, sizeof(time_str), "%H:%M:%S", &tm_buf);
 
@@ -241,15 +238,13 @@ namespace {
                     for (auto drop : items) {
                         ImGui::PushID(item_idx++);
 
-                        std::tm tm_buf{};
-                        localtime_s(&tm_buf, &drop->system_time);
+                        std::tm tm_buf = TextUtils::Time::SafeLocaltime(drop->system_time);
                         char time_str[32];
                         std::strftime(time_str, sizeof(time_str), "%H:%M:%S", &tm_buf);
 
                         ImGui::TableNextRow();
                         ImGui::TableNextColumn();
 
-                        // Show item details with weapon stats
                         ImGui::TextColored(GW::Items::GetRarityColor(drop->rarity), "%s", drop->GetItemName()->string().c_str());
                         ImGui::TableNextColumn();
                         ImGui::Text("%d", drop->quantity);
@@ -367,19 +362,23 @@ void DropTrackerWindow::Draw(IDirect3DDevice9*)
 }
 
 void DropTrackerWindow::DrawSettingsInternal() {
-    ImGui::DragFloat("Item Icon Size", &icon_size, 16, 0, 64);
+    ImGui::DragFloat("Item Icon Size", &settings.icon_size, 16, 0, 64);
 }
 
-void DropTrackerWindow::LoadSettings(ToolboxIni* ini)
+void DropTrackerWindow::Initialize()
 {
-    ToolboxWindow::LoadSettings(ini);
-    LOAD_FLOAT(icon_size);
-    LOAD_FLOAT(run_count);
+    ToolboxWindow::Initialize();
+    SettingsRegistry::Register(this, settings);
 }
 
-void DropTrackerWindow::SaveSettings(ToolboxIni* ini)
+void DropTrackerWindow::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
-    ToolboxWindow::SaveSettings(ini);
-    SAVE_FLOAT(icon_size);
-    SAVE_FLOAT(run_count);
+    ToolboxWindow::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
+}
+
+void DropTrackerWindow::SaveSettings(SettingsDoc& doc)
+{
+    ToolboxWindow::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 }

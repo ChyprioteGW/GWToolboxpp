@@ -32,15 +32,12 @@ namespace {
         }
         const std::wstring arg2 = PluginUtils::ToLower(argv[2]);
         if (arg2 == L"hide") {
-            // /tb PluginName hide
             *instance->GetVisiblePtr() = false;
         }
         else if (arg2 == L"show") {
-            // /tb PluginName hide
             *instance->GetVisiblePtr() = true;
         }
         else if (arg2 == L"toggle") {
-            // /tb PluginName hide
             *instance->GetVisiblePtr() = !*instance->GetVisiblePtr();
         }
         if (arg1 != pluginname) {
@@ -74,6 +71,28 @@ void ToolboxUIPlugin::SignalTerminate()
 void ToolboxUIPlugin::Terminate()
 {
     ToolboxPlugin::Terminate();
+}
+
+void ToolboxUIPlugin::LoadSettings(const wchar_t* folder)
+{
+    ToolboxPlugin::LoadSettings(folder);
+    LoadSetting("visible", plugin_visible);
+    LoadSetting("lock_move", lock_move);
+    LoadSetting("lock_size", lock_size);
+    LoadSetting("show_closebutton", show_closebutton);
+    LoadSetting("show_menubutton", show_menubutton);
+    LoadSetting("show_title", show_title);
+}
+
+void ToolboxUIPlugin::SaveSettings(const wchar_t* folder)
+{
+    SaveSetting("visible", plugin_visible);
+    SaveSetting("lock_move", lock_move);
+    SaveSetting("lock_size", lock_size);
+    SaveSetting("show_closebutton", show_closebutton);
+    SaveSetting("show_menubutton", show_menubutton);
+    SaveSetting("show_title", show_title);
+    ToolboxPlugin::SaveSettings(folder);
 }
 
 void ToolboxUIPlugin::DrawSettings()
@@ -129,33 +148,6 @@ void ToolboxUIPlugin::DrawSettings()
     }
 }
 
-void ToolboxUIPlugin::LoadSettings(const wchar_t* folder)
-{
-    if (!HasSettings()) {
-        return;
-    }
-    ToolboxPlugin::LoadSettings(folder);
-    plugin_visible = ini.GetBoolValue(Name(), VAR_NAME(plugin_visible), plugin_visible);
-    lock_move = ini.GetBoolValue(Name(), VAR_NAME(lock_move), lock_move);
-    lock_size = ini.GetBoolValue(Name(), VAR_NAME(lock_size), lock_size);
-    show_menubutton = ini.GetBoolValue(Name(), VAR_NAME(show_menubutton), show_menubutton);
-    show_closebutton = ini.GetBoolValue(Name(), VAR_NAME(show_closebutton), show_closebutton);
-    show_title = ini.GetBoolValue(Name(), VAR_NAME(show_title), show_title);
-}
-
-void ToolboxUIPlugin::SaveSettings(const wchar_t* folder)
-{
-    if (!HasSettings()) {
-        return;
-    }
-    ini.SetBoolValue(Name(), VAR_NAME(plugin_visible), plugin_visible);
-    ini.SetBoolValue(Name(), VAR_NAME(lock_move), lock_move);
-    ini.SetBoolValue(Name(), VAR_NAME(lock_size), lock_size);
-    ini.SetBoolValue(Name(), VAR_NAME(show_menubutton), show_menubutton);
-    ini.SetBoolValue(Name(), VAR_NAME(show_closebutton), show_closebutton);
-    ini.SetBoolValue(Name(), VAR_NAME(show_title), show_title);
-    ToolboxPlugin::SaveSettings(folder);
-}
 
 int ToolboxUIPlugin::GetWinFlags(ImGuiWindowFlags flags) const
 {

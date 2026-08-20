@@ -10,8 +10,12 @@
 #include <ImGuiAddons.h>
 #include <GWCA/Managers/GameThreadMgr.h>
 #include <GWCA/Managers/UIMgr.h>
+
+#include <Defines.h>
 #include <Utils/GuiUtils.h>
 #include <Timer.h>
+
+#include <Utils/ArenaNetFileParser.h>
 
 namespace {
 
@@ -83,7 +87,6 @@ struct MusicData {
 
     bool force_play_sound = false;
 
-    // Helper function to handle common logic
     template <typename CallbackMap>
     GW::RecObject* PlayAudioInternal(wchar_t* filename, SoundProps* props, CallbackMap& callbacks, PlaySound_pt ret_func)
     {
@@ -91,12 +94,10 @@ struct MusicData {
         GW::RecObject* ret = nullptr;
         GW::HookStatus status;
 
-        // Execute callbacks
         for (auto& [_, cb] : callbacks) {
             cb(&status, filename, props);
         }
 
-        // Check if sound should be played
         if (!status.blocked) {
             if (!force_play_sound) {
                 bool found = std::ranges::find(blocked_sounds, filename) != blocked_sounds.end();
@@ -119,7 +120,6 @@ struct MusicData {
     GW::RecObject* OnPlaySound(wchar_t* filename, SoundProps* props)
     {
         auto handle = PlayAudioInternal(filename, props, play_sound_callbacks, PlaySound_Ret);
-        // Log sound if enabled
         if (log_sounds && std::ranges::find(logged_sounds, filename) == logged_sounds.end()) {
             logged_sounds.push_back(filename);
         }
@@ -163,6 +163,14 @@ bool AudioSettings::PlayMusic(const wchar_t* filename, uint32_t flags)
     });
     return true;
 }
+bool AudioSettings::PlaySoundFileId(const uint32_t file_id, const GW::Vec3f* position, uint32_t flags, void** handle_out) {
+    wchar_t buf[3] = {0};
+    if(file_id)
+        ArenaNetFileParser::FileIdToFileHash(file_id, buf);
+    return wcslen(buf) == 2 && PlaySound(buf, position, flags, handle_out);
+}
+
+
 bool AudioSettings::PlaySound(const wchar_t* filename, const GW::Vec3f* position, uint32_t flags, void** handle_out)
 {
     if (!(PlaySound_Func && filename))
@@ -173,6 +181,7 @@ bool AudioSettings::PlaySound(const wchar_t* filename, const GW::Vec3f* position
     }
     props->flags = flags;
     GW::GameThread::Enqueue([cpy = std::wstring(filename), props, handle_out]() {
+        if (!PlaySound_Func) return;
         force_play_sound = true;
         const auto handle = PlaySound_Func(cpy.c_str(), props);
         if (handle_out)
@@ -186,8 +195,8 @@ bool AudioSettings::StopSound(void* handle)
 {
     // This doesn't work :(
     if (!(StopSound_Func && CloseHandle_Func && handle)) return false;
-    GW::GameThread::Enqueue([handle]() {
-        StopSound_Func((GW::RecObject*)handle,0);
+    GW::GameThread::Enqueue([handle] {
+        StopSound_Func((GW::RecObject*)handle, 0);
         CloseHandle_Func((GW::RecObject*)handle);
     });
     return true;
@@ -211,11 +220,13 @@ void AudioSettings::Initialize()
 {
     ToolboxModule::Initialize();
     PlaySound_Func = (PlaySound_pt)GW::Scanner::ToFunctionStart(GW::Scanner::FindAssertion("SndMain.cpp","filename",0,0));
+    DEBUG_ASSERT(PlaySound_Func);
     if (PlaySound_Func) {
         GW::Hook::CreateHook((void**)&PlaySound_Func, OnPlaySound, reinterpret_cast<void**>(&PlaySound_Ret));
         GW::Hook::EnableHooks(PlaySound_Func);
     }
     PlayMusicFromSoundScript_Func = (PlayMusicFromSoundScript_pt)GW::Scanner::ToFunctionStart(GW::Scanner::Find("\x8d\x77\x0c\x83\xe0\xf3", "xxxxxx", 0));
+    DEBUG_ASSERT(PlayMusicFromSoundScript_Func);
     if (PlayMusicFromSoundScript_Func) {
         GW::Hook::CreateHook((void**)&PlayMusicFromSoundScript_Func, OnPlayMusicFromSoundScript, reinterpret_cast<void**>(&PlayMusicFromSoundScript_Ret));
         GW::Hook::EnableHooks(PlayMusicFromSoundScript_Func);
@@ -235,13 +246,13 @@ void AudioSettings::Initialize()
     ASSERT(StopSound_Func);
     ASSERT(PlayMusicFromSoundScript_Func);
     #endif
-    GW::UI::RegisterUIMessageCallback(&OnUIMessage_HookEntry, GW::UI::UIMessage::kMapChange, OnPostUIMessage, 0x8000);
+    RegisterUIMessageCallback(&OnUIMessage_HookEntry, GW::UI::UIMessage::kMapChange, OnPostUIMessage, 0x8000);
 
 }
 void AudioSettings::Update(float) {
-    for (auto& it : blocked_sounds_until) {
-        if (it.second < TIMER_INIT()) {
-            blocked_sounds_until.erase(it.first);
+    for (auto& [sound, timer] : blocked_sounds_until) {
+        if (timer < TIMER_INIT()) {
+            blocked_sounds_until.erase(sound);
             break;
         }
     }
@@ -265,44 +276,49 @@ void AudioSettings::SignalTerminate()
     logged_music.clear();
     GW::UI::RemoveUIMessageCallback(&OnUIMessage_HookEntry);
 }
-void AudioSettings::LoadSettings(ToolboxIni* ini)
+void AudioSettings::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
-    CSimpleIni::TNamesDepend keys{};
+    ToolboxModule::LoadSettings(doc, legacy);
     blocked_sounds.clear();
-    if (ini->GetAllKeys(Name(), keys)) {
-        for (const auto& key : keys) {
-            if (strncmp(key.pItem, "blocked_sounds", 14) != 0)
-                continue;
-            std::wstring out;
-            GuiUtils::IniToArray(ini->GetValue(Name(),key.pItem,""),out);
-            if (!out.empty())
-                blocked_sounds.push_back(std::move(out));
+    std::vector<SettingWString> stored;
+    if (doc.Get(Name(), "blocked_sounds", stored)) {
+        for (auto& s : stored) {
+            if (!s.value.empty())
+                blocked_sounds.push_back(std::move(s.value));
+        }
+    }
+    else if (legacy) {
+        TNamesDepend keys{};
+        if (legacy->GetAllKeys(Name(), keys)) {
+            for (const auto& key : keys) {
+                if (strncmp(key.pItem, "blocked_sounds", 14) != 0)
+                    continue;
+                std::wstring out;
+                GuiUtils::IniToArray(legacy->GetValue(Name(), key.pItem, ""), out);
+                if (!out.empty())
+                    blocked_sounds.push_back(std::move(out));
+            }
         }
     }
 }
-void AudioSettings::SaveSettings(ToolboxIni* ini)
+void AudioSettings::SaveSettings(SettingsDoc& doc)
 {
-    CSimpleIni::TNamesDepend values{};
-    ini->Delete(Name(), "blocked_sounds");
-    std::string buf;
-    size_t i = 0;
-    ini->Delete(Name(),NULL);
+    ToolboxModule::SaveSettings(doc);
+    std::vector<SettingWString> stored;
     for (const auto& filename : blocked_sounds) {
-        GuiUtils::ArrayToIni(filename, &buf);
-        if (!buf.empty()) {
-            auto key = std::format("blocked_sounds{}", i++);
-            ini->SetValue(Name(), key.c_str(), buf.c_str());
-        } 
+        if (!filename.empty())
+            stored.emplace_back(filename);
     }
+    doc.Set(Name(), "blocked_sounds", stored);
 }
 void AudioSettings::DrawSettingsInternal() {
 
     using PlaySoundInt_pt = bool(__cdecl*)(const wchar_t*, uint32_t, uint32_t, uint32_t);
 
     auto log_sound = [](const std::wstring& filename, PlaySoundInt_pt PlaySound_pt, uint32_t arg1, uint32_t arg2, uint32_t arg3) {
-        ImGui::PushID(&filename);
         std::string buf;
         GuiUtils::ArrayToIni(filename, &buf);
+        ImGui::PushID(buf.c_str());
         ImGui::TextUnformatted(buf.c_str());
         ImGui::SameLine(200.f * ImGui::FontScale());
         if (ImGui::Button("Play")) {
@@ -348,7 +364,7 @@ void AudioSettings::DrawSettingsInternal() {
     if (ImGui::CollapsingHeader("In-Game Music Log")) {
             if (ImGui::Button("Clear Logged Music")) logged_music.clear();
             for (const auto& filename : logged_music) {
-                log_sound(filename, (PlaySoundInt_pt)PlayMusic, 0x83, 0, 0);
+                log_sound(filename, (PlaySoundInt_pt)PlayMusic, SoundFlags_MusicDefault, 0, 0);
             }
     }
 

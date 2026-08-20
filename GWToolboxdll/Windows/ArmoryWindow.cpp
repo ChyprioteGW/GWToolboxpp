@@ -11,9 +11,8 @@
 
 #include <GWCA/Managers/AgentMgr.h>
 #include <GWCA/Managers/ItemMgr.h>
-#include <GWCA/Managers/MapMgr.h>
 
-#include <Modules/GwDatTextureModule.h>
+#include <Modules/GwDatModule.h>
 
 #include <Windows/ArmoryWindow_Constants.h>
 #include <Windows/ArmoryWindow.h>
@@ -24,9 +23,18 @@
 #include <Utils/GuiUtils.h>
 
 #include <GWCA/Managers/GameThreadMgr.h>
-#include <GWCA/Managers/UIMgr.h>
 #include <Modules/Resources.h>
+#include <Utils/ToolboxUtils.h>
 
+namespace armory_snapshot {
+    struct WeaponEntry {
+        std::string name;
+        uint32_t model_file_id = 0;
+        uint8_t type = 0;
+        uint32_t interaction = 0;
+        uint8_t dye_tint = 0;
+    };
+}
 
 namespace GWArmory {
 
@@ -321,35 +329,6 @@ namespace GWArmory {
         }
     }
 
-    const char* GetProfessionName(const GW::Constants::Profession prof)
-    {
-        switch (prof) {
-            case GW::Constants::Profession::None:
-                return "None";
-            case GW::Constants::Profession::Warrior:
-                return "Warrior";
-            case GW::Constants::Profession::Ranger:
-                return "Ranger";
-            case GW::Constants::Profession::Monk:
-                return "Monk";
-            case GW::Constants::Profession::Necromancer:
-                return "Necromancer";
-            case GW::Constants::Profession::Mesmer:
-                return "Mesmer";
-            case GW::Constants::Profession::Elementalist:
-                return "Elementalist";
-            case GW::Constants::Profession::Assassin:
-                return "Assassin";
-            case GW::Constants::Profession::Ritualist:
-                return "Ritualist";
-            case GW::Constants::Profession::Paragon:
-                return "Paragon";
-            case GW::Constants::Profession::Dervish:
-                return "Dervish";
-            default:
-                return "Unknown Profession";
-        }
-    }
 
     GW::Constants::Profession GetAgentProfession(GW::AgentLiving* agent)
     {
@@ -445,6 +424,24 @@ namespace GWArmory {
             return "Costume Head";
         }
         return "Unknown";
+    }
+
+    const char* GetWeaponTypeName(ItemType type)
+    {
+        switch (type) {
+        case ItemType::Axe:     return "Axes";
+        case ItemType::Bow:     return "Bows";
+        case ItemType::Daggers: return "Daggers";
+        case ItemType::Hammer:  return "Hammers";
+        case ItemType::Offhand: return "Off-hand";
+        case ItemType::Scythe:  return "Scythes";
+        case ItemType::Shield:  return "Shields";
+        case ItemType::Spear:   return "Spears";
+        case ItemType::Staff:   return "Staves";
+        case ItemType::Sword:   return "Swords";
+        case ItemType::Wand:    return "Wands";
+        default:                return "Weapons";
+        }
     }
 
     bool armor_pieces_array_getter(void* data, const int idx, const char** out_text)
@@ -642,7 +639,7 @@ namespace GWArmory {
         bool value_changed = false;
         const char* label_display_end = ImGui::FindRenderedTextEnd(label);
 
-        if (ImGui::ColorButton("##ColorButton", current_color, *color == GW::DyeColor::None ? ImGuiColorEditFlags_AlphaPreview : 0)) {
+        if (ImGui::ColorButton("##ColorButton", current_color, 0)) {
             ImGui::OpenPopup("picker");
         }
 
@@ -652,7 +649,7 @@ namespace GWArmory {
                 ImGui::Separator();
             }
             size_t palette_index;
-            if (ImGui::ColorPalette("##picker", &palette_index, palette, _countof(palette), 7, ImGuiColorEditFlags_AlphaPreview)) {
+            if (ImGui::ColorPalette("##picker", &palette_index, palette, _countof(palette), 7, ImGuiColorEditFlags_NoAlpha)) {
                 if (palette_index < _countof(palette)) {
                     *color = DyeColorFromInt(palette_index + static_cast<size_t>(GW::DyeColor::Blue));
                 }
@@ -674,28 +671,40 @@ namespace GWArmory {
         return player && player->GetIsFemale();
     }
 
-    IDirect3DTexture9** GetArmorPieceImage(uint32_t model_file_id, uint32_t interaction) {
-        const bool is_composite_item = (interaction & 4) != 0;
-
-        uint32_t model_id_to_load = 0;
-
-        if (is_composite_item) {
-            // Armor/runes
-            const auto model_file_info = GW::Items::GetCompositeModelInfo(model_file_id);
-            if (model_file_info) {
-                if(!model_id_to_load)
-                    model_id_to_load = model_file_info->file_ids[0xa];
-                if (!model_id_to_load)
-                    model_id_to_load = GetIsFemale() ? model_file_info->file_ids[5] : model_file_info->file_ids[0];
-
-            }
-        }
-        if (!model_id_to_load)
-            model_id_to_load = model_file_id;
-
-        return GwDatTextureModule::LoadTextureFromFileId(model_id_to_load);
+    // The four chosen dye slots for the piece being previewed (global override wins),
+    // packed one per byte for LoadItemImage, which blends them like GW combines dyes.
+    uint32_t ChosenDyes(const GW::ItemData* player_piece) {
+        const GW::DyeColor slots[4] = {player_piece->dye.dye1, player_piece->dye.dye2,
+                                       player_piece->dye.dye3, player_piece->dye.dye4};
+        uint32_t dyes = 0;
+        for (int i = 0; i < 4; ++i)
+            dyes |= static_cast<uint32_t>(use_global_color ? global_dyes[i] : slots[i]) << (i * 8);
+        return dyes;
     }
-    
+
+    // Set by GetArmorPieceImage whenever a piece it returns has no icon loaded; consumed (and reset) by
+    // Draw() each frame to decide whether to show the missing-data warning at the top of the window.
+    bool armor_icon_missing = false;
+
+    IDirect3DTexture9** GetArmorPieceImage(uint32_t model_file_id, uint32_t interaction, uint32_t dyes = 0, bool* failed_out = nullptr) {
+        IDirect3DTexture9** result = Resources::GetItemImage(model_file_id, interaction, dyes, GetIsFemale(), failed_out);
+        if (!*result)
+            armor_icon_missing = true; // a shown piece has no icon (yet) - flag for the warning
+        return result;
+    }
+
+    // Grid slot for an icon whose decode has permanently failed - keeps the piece selectable and in the
+    // grid (rather than silently vanishing), but visually distinct from a loaded icon.
+    bool DrawFailedIconButton(const ImVec2& size)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.35f, 0.1f, 0.1f, 0.6f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.5f, 0.15f, 0.15f, 0.8f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.6f, 0.2f, 0.2f, 0.9f));
+        const bool clicked = ImGui::Button("?", size);
+        ImGui::PopStyleColor(3);
+        return clicked;
+    }
+
     std::string GetChatCommand(Armor* armor, GW::ItemData* data)
     {
         return std::format("/armory \"{}\" {} {} {} {}", armor->label, std::to_underlying(data->dye.dye1), std::to_underlying(data->dye.dye2), std::to_underlying(data->dye.dye3), std::to_underlying(data->dye.dye4));
@@ -707,7 +716,7 @@ namespace GWArmory {
         const auto armor_item = (Armor*)wparam;
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0, 0));
         ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0, 0).Value);
-        const auto size = ImVec2(250.0f * ImGui::GetIO().FontGlobalScale, 0);
+        const auto size = ImVec2(250.0f * ImGui::FontScale(), 0);
         ImGui::TextUnformatted(armor_item->label);
         const auto chat_cmd = GetChatCommand(armor_item, &context_menu_piece);
         ImGui::TextDisabled(chat_cmd.c_str());
@@ -750,7 +759,7 @@ namespace GWArmory {
         const auto player_piece = &imgui_armor_pieces[slot];
         bool value_changed = false;
 
-        const float scale = ImGui::GetIO().FontGlobalScale;
+        const float scale = ImGui::FontScale();
 
         ImGui::Separator();
         ImGui::TextUnformatted(GetSlotName(slot));
@@ -816,7 +825,7 @@ namespace GWArmory {
 
         ImGui::StartSpacedElements(icon_size.x);
 
-#ifdef _DEBUG
+#if 0
         static Armor debug_piece("Debug Piece", 0, Profession::None, ItemType::Unknown, Campaign::Core, 0, 0);
         if (ImGui::CollapsingHeader("Debug Item")) {
             constexpr static std::array profession_names = {
@@ -843,7 +852,7 @@ namespace GWArmory {
 #else
         for (const auto& piece : state->pieces) {
 #endif
-            ImGui::PushID(piece);
+            ImGui::PushID(piece->label);
 
             if (0 <= state->current_piece_index && static_cast<size_t>(state->current_piece_index) < state->pieces.size()) {
                 state->current_piece = state->pieces[state->current_piece_index];
@@ -854,16 +863,24 @@ namespace GWArmory {
                 player_piece->dye.dye_tint = state->current_piece->dye_tint;
             }
 
-            const auto texture = GetArmorPieceImage(piece->model_file_id, piece->interaction);
-            if (!texture || !*texture) {
+            bool image_failed = false;
+            const auto texture = GetArmorPieceImage(piece->model_file_id, piece->interaction, ChosenDyes(player_piece), &image_failed);
+            if (!texture || (!*texture && !image_failed)) {
                 ImGui::PopID();
-                continue;
+                continue; // not decoded yet - skip for now, will show once it resolves
             }
-    
-            const auto uv1 = ImGui::CalculateUvCrop(*texture, scaled_size);
+
             const auto& bg = player_piece->model_file_id == piece->model_file_id ? equipped_color : normal_bg;
             ImGui::NextSpacedElement();
-            if (ImGui::ImageButton(*texture, scaled_size, uv0, uv1, -1, bg, tint)) {
+            bool clicked;
+            if (*texture) {
+                const auto uv1 = ImGui::CalculateUvCrop(*texture, scaled_size);
+                clicked = ImGui::ImageButton(*texture, scaled_size, uv0, uv1, -1, bg, tint);
+            }
+            else {
+                clicked = DrawFailedIconButton(scaled_size);
+            }
+            if (clicked) {
                 player_piece->model_file_id = piece->model_file_id;
                 player_piece->interaction = piece->interaction;
                 player_piece->type = piece->type;
@@ -872,9 +889,14 @@ namespace GWArmory {
             }
 
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip([piece, player_piece]() {
-                    ImGui::TextUnformatted(piece->label);
-                    ImGui::TextDisabled(GetChatCommand(piece, player_piece).c_str());
+                ImGui::SetTooltip([piece, player_piece, image_failed]() {
+                    if (image_failed) {
+                        ImGui::TextUnformatted(std::format("Image load failed for {}", piece->label).c_str());
+                    }
+                    else {
+                        ImGui::TextUnformatted(piece->label);
+                        ImGui::TextDisabled(GetChatCommand(piece, player_piece).c_str());
+                    }
                 });
             }
             if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
@@ -890,9 +912,142 @@ namespace GWArmory {
         return value_changed;
     }
 
+    bool DrawWeaponsByType(ItemType type)
+    {
+        const ItemSlot slot = GetSlotFromItemType(type);
+        const auto state = &combo_list_states[slot];
+        const auto player_piece = &imgui_armor_pieces[slot];
+        bool value_changed = false;
+
+        std::vector<Armor*> type_pieces;
+        for (auto* piece : state->pieces) {
+            if (piece->type == type)
+                type_pieces.push_back(piece);
+        }
+        if (type_pieces.empty())
+            return false;
+
+        ImGui::PushID(static_cast<int>(type));
+
+        const float scale = ImGui::FontScale();
+
+        ImGui::Separator();
+        ImGui::TextUnformatted(GetWeaponTypeName(type));
+
+        ImGui::PushID(slot);
+
+        auto tmpDyeColor = player_piece->dye.dye1;
+        ImGui::SameLine(128.f * scale);
+        if (DyePicker("color1", &tmpDyeColor) || use_global_color && tmpDyeColor != global_dyes[0]) {
+            value_changed = true;
+            player_piece->dye.dye1 = use_global_color ? global_dyes[0] : tmpDyeColor;
+        }
+
+        tmpDyeColor = player_piece->dye.dye2;
+        ImGui::SameLine();
+        if (DyePicker("color2", &tmpDyeColor) || use_global_color && tmpDyeColor != global_dyes[1]) {
+            value_changed = true;
+            player_piece->dye.dye2 = use_global_color ? global_dyes[1] : tmpDyeColor;
+        }
+
+        tmpDyeColor = player_piece->dye.dye3;
+        ImGui::SameLine();
+        if (DyePicker("color3", &tmpDyeColor) || use_global_color && tmpDyeColor != global_dyes[2]) {
+            value_changed = true;
+            player_piece->dye.dye3 = use_global_color ? global_dyes[2] : tmpDyeColor;
+        }
+
+        tmpDyeColor = player_piece->dye.dye4;
+        ImGui::SameLine();
+        if (DyePicker("color4", &tmpDyeColor) || use_global_color && tmpDyeColor != global_dyes[3]) {
+            value_changed = true;
+            player_piece->dye.dye4 = use_global_color ? global_dyes[3] : tmpDyeColor;
+        }
+
+        ImGui::SameLine(280.f * scale);
+        if (ImGui::SmallButton("None")) {
+            player_piece->model_file_id = 0;
+            value_changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip([slot]() {
+                ImGui::TextUnformatted("Empty Slot");
+                ImGui::TextDisabled("/armory %s", empty_slot_names.at(slot).data());
+            });
+        }
+
+        ImGui::PopID();
+
+        constexpr ImVec4 tint(1, 1, 1, 1);
+        constexpr auto uv0 = ImVec2(0, 0);
+        const ImVec2 icon_size = { 48.f, 48.f };
+        ImVec2 scaled_size(icon_size.x * scale, icon_size.y * scale);
+
+        const auto equipped_color = ImColor(IM_COL32(0, 0x99, 0, 192));
+        const auto normal_bg = ImColor(IM_COL32(0, 0, 0, 0));
+
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.f, 0.5f));
+
+        ImGui::StartSpacedElements(icon_size.x);
+
+        for (const auto& piece : type_pieces) {
+            ImGui::PushID(piece->label);
+
+            bool image_failed = false;
+            const auto texture = GetArmorPieceImage(piece->model_file_id, piece->interaction, ChosenDyes(player_piece), &image_failed);
+            if (!texture || (!*texture && !image_failed)) {
+                ImGui::PopID();
+                continue; // not decoded yet - skip for now, will show once it resolves
+            }
+
+            const auto& bg = player_piece->model_file_id == piece->model_file_id ? equipped_color : normal_bg;
+            ImGui::NextSpacedElement();
+            bool clicked;
+            if (*texture) {
+                const auto uv1 = ImGui::CalculateUvCrop(*texture, scaled_size);
+                clicked = ImGui::ImageButton(*texture, scaled_size, uv0, uv1, -1, bg, tint);
+            }
+            else {
+                clicked = DrawFailedIconButton(scaled_size);
+            }
+            if (clicked) {
+                player_piece->model_file_id = piece->model_file_id;
+                player_piece->interaction = piece->interaction;
+                player_piece->type = piece->type;
+                player_piece->dye.dye_tint = piece->dye_tint;
+                value_changed = true;
+            }
+
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip([piece, player_piece, image_failed]() {
+                    if (image_failed) {
+                        ImGui::TextUnformatted(std::format("Image load failed for {}", piece->label).c_str());
+                    }
+                    else {
+                        ImGui::TextUnformatted(piece->label);
+                        ImGui::TextDisabled(GetChatCommand(piece, player_piece).c_str());
+                    }
+                });
+            }
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+                context_menu_piece = *player_piece;
+                ImGui::SetContextMenu(ArmorItemContextMenu, piece);
+            }
+            ImGui::PopID();
+        }
+
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+        ImGui::PopStyleVar();
+        ImGui::PopID();
+        return value_changed;
+    }
+
     enum SnapshotState { Idle, Pending, WaitingForDecode };
     SnapshotState state = SnapshotState::Idle;
-    std::map<uint32_t, GuiUtils::EncString*> pending_decodes;
+    std::map<uint32_t, std::unique_ptr<GuiUtils::EncString>> pending_decodes;
     std::map<uint32_t, GW::Item*> pending_items;
 
     void SnapshotToFile()
@@ -901,9 +1056,6 @@ namespace GWArmory {
             case SnapshotState::Idle:
                 return;
             case SnapshotState::Pending: {
-                for (auto& it : pending_decodes) {
-                    delete it.second;
-                }
                 pending_decodes.clear();
                 pending_items.clear();
                 for (uint8_t i = (uint8_t)GW::Constants::Bag::Backpack; i < (uint8_t)GW::Constants::Bag::Max; i++) {
@@ -912,7 +1064,7 @@ namespace GWArmory {
                     for (auto item : bag->items) {
                         if (!(item && IsWeapon(item->type))) continue;
                         if (pending_items.contains(item->model_file_id)) continue;
-                        pending_decodes[item->model_file_id] = new GuiUtils::EncString(item->name_enc);
+                        pending_decodes[item->model_file_id] = std::make_unique<GuiUtils::EncString>(item->name_enc);
                         pending_decodes[item->model_file_id]->string(); // Trigger decode
                         pending_items[item->model_file_id] = item;
                     }
@@ -920,33 +1072,27 @@ namespace GWArmory {
                 state = SnapshotState::WaitingForDecode;
             } break;
             case SnapshotState::WaitingForDecode: {
-                // Check if all strings are decoded
                 for (auto& it : pending_decodes) {
                     if (it.second->IsDecoding()) return;
                 }
 
-                // Build JSON output
-                nlohmann::json output_json = nlohmann::json::array();
+                std::vector<armory_snapshot::WeaponEntry> output;
+                output.reserve(pending_decodes.size());
                 for (auto& it : pending_decodes) {
                     const auto item = pending_items[it.first];
-                    const std::string& item_name_decoded = it.second->string();
-
-                    nlohmann::json item_json = {
-                        {"name", item_name_decoded},
-                        {"model_file_id", item->model_file_id},
-                        {"type", static_cast<uint8_t>(item->type)},
-                        {"interaction", item->interaction},
-                        {"dye_tint", item->dye.dye_tint}
-                    };
-
-                    output_json.push_back(item_json);
+                    output.push_back({
+                        .name = it.second->string(),
+                        .model_file_id = item->model_file_id,
+                        .type = static_cast<uint8_t>(item->type),
+                        .interaction = item->interaction,
+                        .dye_tint = item->dye.dye_tint,
+                    });
                 }
 
-                // Write to file
                 const auto filename = Resources::GetPath("weapon_snapshot.json");
                 std::ofstream file(filename);
                 if (file.is_open()) {
-                    file << output_json.dump(2); // Pretty print with 2 space indent
+                    file << glz::write<glz::opts{.prettify = true}>(output).value_or(std::string{}); // Pretty print
                     file.close();
                     Log::Info("Weapon snapshot saved to %s", filename.string().c_str());
                 }
@@ -954,10 +1100,6 @@ namespace GWArmory {
                     Log::Error("Failed to write weapon snapshot to %s", filename.string().c_str());
                 }
 
-                // Cleanup
-                for (auto& it : pending_decodes) {
-                    delete it.second;
-                }
                 pending_decodes.clear();
                 pending_items.clear();
                 state = SnapshotState::Idle;
@@ -1078,7 +1220,7 @@ namespace GWArmory {
         if (!equip) return false;
         if (!equip->items[slot].model_file_id) return true;
         gwarmory_setitem = true;
-        equip->vtable->RemoveItem(equip, 0, slot);
+        equip->UndrawEquipmentSlot(slot);
         equip->items[slot] = {0};
         gwarmory_setitem = false;
         return true;
@@ -1094,20 +1236,20 @@ namespace GWArmory {
             if (!IsCostumeFileId(drawn_pieces[slot].model_file_id)) 
                 continue;
             if (equip->items[slot].model_file_id && !IsCostumeFileId(equip->items[slot].model_file_id)) {
-                equip->vtable->EquipItem(equip, 0, slot);
+                equip->RedrawEquipmentSlot(slot);
                 continue;
             }
             if (!equip->item_ids[slot]) {
                 if (equip->items[slot].model_file_id) {
-                    equip->vtable->RemoveItem(equip, 0, slot);
+                    equip->UndrawEquipmentSlot(slot);
                     equip->items[slot] = {0};
-                } 
+                }
                 continue;
             }
             const auto item = GW::Items::GetItemById(equip->item_ids[slot]);
             if (item && item->model_file_id && !IsCostumeFileId(item->model_file_id)) {
                 GwItemToItemData(item, &equip->items[slot]);
-                equip->vtable->EquipItem(equip, 0, slot);
+                equip->RedrawEquipmentSlot(slot);
             }
         }
         gwarmory_setitem = false;
@@ -1154,14 +1296,14 @@ namespace GWArmory {
         ClearArmorItem(slot);
         gwarmory_setitem = true;
         equip->items[slot] = cpy;
-        equip->vtable->EquipItem(equip, 0, slot);
-        
+        equip->RedrawEquipmentSlot(slot);
+
         if (slot == ItemSlot::CostumeHead) {
             // If we're a festival hat, set the correct model file id for this character's profession
             if (const auto hat_found = GetFileIdForFestivalHat(cpy.model_file_id, current_profession)) {
                 equip->items[ItemSlot::Headpiece] = cpy;
                 equip->items[ItemSlot::Headpiece].model_file_id = *hat_found;
-                equip->vtable->EquipItem(equip, 0, ItemSlot::Headpiece);
+                equip->RedrawEquipmentSlot(ItemSlot::Headpiece);
             }
         }
         if (slot == ItemSlot::CostumeBody) {
@@ -1169,16 +1311,16 @@ namespace GWArmory {
                 // If we're a costume, set all of the other armor piece model file ids for this character's profession
                 equip->items[ItemSlot::Boots] = cpy;
                 equip->items[ItemSlot::Boots].model_file_id = costume_found[0];
-                equip->vtable->EquipItem(equip, 0, ItemSlot::Boots);
+                equip->RedrawEquipmentSlot(ItemSlot::Boots);
                 equip->items[ItemSlot::Leggings] = cpy;
                 equip->items[ItemSlot::Leggings].model_file_id = costume_found[1];
-                equip->vtable->EquipItem(equip, 0, ItemSlot::Leggings);
+                equip->RedrawEquipmentSlot(ItemSlot::Leggings);
                 equip->items[ItemSlot::Gloves] = cpy;
                 equip->items[ItemSlot::Gloves].model_file_id = costume_found[2];
-                equip->vtable->EquipItem(equip, 0, ItemSlot::Gloves);
+                equip->RedrawEquipmentSlot(ItemSlot::Gloves);
                 equip->items[ItemSlot::Chestpiece] = cpy;
                 equip->items[ItemSlot::Chestpiece].model_file_id = costume_found[3];
-                equip->vtable->EquipItem(equip, 0, ItemSlot::Chestpiece);
+                equip->RedrawEquipmentSlot(ItemSlot::Chestpiece);
             }
         }
         gwarmory_setitem = false;
@@ -1248,11 +1390,22 @@ void ArmoryWindow::Draw(IDirect3DDevice9*)
     ImGui::SetNextWindowCenter(ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(350, 208), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(Name(), GetVisiblePtr(), GetWinFlags())) {
-        ImGui::Text("Profession: %s", GetProfessionName(current_profession));
+        // From last frame's render: a shown piece had no icon and the dat is missing data. Warn, then reset
+        // so this frame's DrawArmorPiece*/DrawWeapons* calls below recompute it.
+        if (armor_icon_missing && GwDatModule::MissingDatData()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.82f, 0.0f, 1.0f)); // amber warning
+            ImGui::TextWrapped("Some images are missing because your Gw.dat is an incomplete (Steam/streaming) "
+                               "install. Run Guild Wars once with the -image command-line option to download "
+                               "all game data, then restart.");
+            ImGui::PopStyleColor();
+            ImGui::Separator();
+        }
+        armor_icon_missing = false;
+
+        ImGui::Text("Profession: %s", ToolboxUtils::GetProfessionName(current_profession)->string().c_str());
 
         ImGui::SameLine();
-        ImGui::Checkbox("Use same colour for all pieces", &use_global_color);
-        ImGui::ShowHelp("When this is selected, all armour pieces will be coloured this way.");
+        ImGui::CheckboxWithHelp("Use same colour for all pieces", &use_global_color, "When this is selected, all armour pieces will be coloured this way.");
 
         if (use_global_color) {
             ImGui::SameLine();
@@ -1273,12 +1426,22 @@ void ArmoryWindow::Draw(IDirect3DDevice9*)
         if (ImGui::MyCombo("##filter", "All", reinterpret_cast<int*>(&current_campaign), armor_filter_array_getter, nullptr, 6)) {
             UpdateArmorsFilter();
         }
-        const auto order = {Headpiece, Chestpiece, Gloves, Leggings, Boots, CostumeHead, CostumeBody, LeftHand, RightHand};
-        for (const auto slot : order) {
+        const auto armor_order = {Headpiece, Chestpiece, Gloves, Leggings, Boots, CostumeHead, CostumeBody};
+        for (const auto slot : armor_order) {
             if (!IsEquipmentSlotSupportedByArmory(slot))
                 continue;
             if (DrawArmorPieceNew(slot)) {
                 SetArmorItem(&imgui_armor_pieces[slot]);
+            }
+        }
+        constexpr ItemType weapon_order[] = {
+            ItemType::Axe, ItemType::Bow, ItemType::Daggers, ItemType::Hammer,
+            ItemType::Scythe, ItemType::Spear, ItemType::Staff, ItemType::Sword,
+            ItemType::Wand, ItemType::Offhand, ItemType::Shield
+        };
+        for (const auto weapon_type : weapon_order) {
+            if (DrawWeaponsByType(weapon_type)) {
+                SetArmorItem(&imgui_armor_pieces[GetSlotFromItemType(weapon_type)]);
             }
         }
         #ifdef _DEBUG

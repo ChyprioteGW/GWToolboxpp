@@ -2,7 +2,7 @@
 
 #include <Widgets/ActiveQuestWidget.h>
 
-#include <Modules/GwDatTextureModule.h>
+#include <Modules/GwDatModule.h>
 #include <Modules/ToolboxSettings.h>
 
 #include <GWCA/Constants/QuestIDs.h>
@@ -60,7 +60,7 @@ namespace {
 void ActiveQuestWidget::Initialize() {
     ToolboxWidget::Initialize();
 
-    p_quest_marker_texture = GwDatTextureModule::LoadTextureFromFileId(QUEST_MARKER_FILE_ID);
+    p_quest_marker_texture = GwDatModule::LoadTextureFromFileId(QUEST_MARKER_FILE_ID);
 
     constexpr auto ui_messages = std::to_array({
         GW::UI::UIMessage::kQuestDetailsChanged,
@@ -71,7 +71,7 @@ void ActiveQuestWidget::Initialize() {
         GW::UI::UIMessage::kObjectiveUpdated
     });
     for (const auto message_id : ui_messages) {
-        GW::UI::RegisterUIMessageCallback(&hook_entry, message_id, SetForceUpdate);
+        RegisterUIMessageCallback(&hook_entry, message_id, SetForceUpdate);
     }
 }
 
@@ -133,22 +133,22 @@ void ActiveQuestWidget::Draw(IDirect3DDevice9*)
 
         ImGui::SameLine();
 
-        ImGui::PushFont(FontLoader::GetFont(FontLoader::FontSize::widget_label));
+        ImGui::PushFont(FontLoader::GetFont(), static_cast<float>(FontLoader::FontSize::widget_label));
         ImGui::PushStyleColor(ImGuiCol_Text, TEXT_COLOR_ACTIVE);
         ImGui::TextUnformatted(active_quest_name.string().c_str());
         ImGui::PopStyleColor();
         ImGui::PopFont();
 
-        ImGui::PushFont(FontLoader::GetFont(FontLoader::FontSize::header2));
+        ImGui::PushFont(FontLoader::GetFont(), static_cast<float>(FontLoader::FontSize::header2));
         for (auto& objective : active_quest_objectives) {
             auto& [_, obj_str, completed] = objective;
 
-            if(completed) {
+            if (completed) {
                 ImGui::PushStyleColor(ImGuiCol_Text, TEXT_COLOR_COMPLETED);
             }
             ImGui::Bullet();
             ImGui::TextUnformatted(objective.objective_enc->string().c_str());
-            if(completed) {
+            if (completed) {
                 ImGui::PopStyleColor();
             }
         }

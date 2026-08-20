@@ -36,7 +36,7 @@ namespace {
     GW::HookEntry ResignLog_HookEntry;
     GW::HookEntry ChatCmd_HookEntry;
 
-    bool show_last_to_resign_message = false;
+    ResignLogModule::Settings settings;
 
     bool IsMapReady() {
         return GW::UI::GetFrameByLabel(L"Log");
@@ -90,7 +90,7 @@ namespace {
 
     void CheckAndWarnIfNotResigned()
     {
-        if (!show_last_to_resign_message) {
+        if (!settings.show_last_to_resign_message) {
             return;
         }
         const auto my_player_number = GW::PlayerMgr::GetPlayerNumber();
@@ -169,8 +169,17 @@ namespace {
         const auto players = GW::PartyMgr::GetPartyPlayers();
         if (!players)
             return;
+        bool pending_only = false;
+        if (argc > 1) {
+            const std::wstring arg1 = TextUtils::ToLower(argv[1]);
+            if (arg1 == L"pending" || arg1 == L"notresigned") {
+                pending_only = true;
+            }
+        }
         std::wstring buffer;
         for (auto& p : *players) {
+            if (pending_only && GetResignStatus(p.login_number) == Status::Resigned)
+                continue;
             if (ResignLogModule::PrintResignStatus(p.login_number, buffer))
                 send_queue.push(buffer);
         }
@@ -180,7 +189,7 @@ namespace {
     void DrawGameSettings(const std::string&, const bool is_showing)
     {
         if (!is_showing) return;
-        ImGui::Checkbox("Show message in chat when you're the last player to resign", &show_last_to_resign_message);
+        ImGui::Checkbox("Show message in chat when you're the last player to resign", &settings.show_last_to_resign_message);
     }
 }
 
@@ -208,6 +217,7 @@ bool ResignLogModule::PrintResignStatus(const uint32_t player_number, std::wstri
 
 void ResignLogModule::Initialize() {
     ToolboxModule::Initialize();
+    SettingsRegistry::Register(this, settings);
 
     GW::UI::UIMessage ui_messages[] = {
         GW::UI::UIMessage::kMapLoaded,
@@ -217,7 +227,7 @@ void ResignLogModule::Initialize() {
     };
 
     for (auto message_id : ui_messages) {
-        GW::UI::RegisterUIMessageCallback(&ResignLog_HookEntry, message_id, OnUIMessage, 0x8000);
+        RegisterUIMessageCallback(&ResignLog_HookEntry, message_id, OnUIMessage, 0x8000);
     }
 
     GW::Chat::CreateCommand(&ChatCmd_HookEntry, L"resignlog", CmdResignLog);
@@ -225,6 +235,17 @@ void ResignLogModule::Initialize() {
     UpdatePlayerStates();
 
 }
+
+void ResignLogModule::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy) {
+    ToolboxModule::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
+}
+
+void ResignLogModule::SaveSettings(SettingsDoc& doc) {
+    ToolboxModule::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
+}
+
 void ResignLogModule::SignalTerminate() {
     GW::UI::RemoveUIMessageCallback(&ResignLog_HookEntry);
     GW::Chat::DeleteCommand(&ChatCmd_HookEntry);
@@ -238,15 +259,4 @@ void ResignLogModule::Update(float) {
             send_queue.pop();
         }
     }
-}
-
-void ResignLogModule::LoadSettings(ToolboxIni* ini)
-{
-    ToolboxModule::LoadSettings(ini);
-    LOAD_BOOL(show_last_to_resign_message);
-}
-void ResignLogModule::SaveSettings(ToolboxIni* ini)
-{
-    ToolboxModule::SaveSettings(ini);
-    SAVE_BOOL(show_last_to_resign_message);
 }

@@ -8,15 +8,14 @@
 #include <GWCA/GameEntities/Party.h>
 #include <GWCA/GameEntities/Guild.h>
 #include <GWCA/GameEntities/Item.h>
+#include <GWCA/GameEntities/Friendslist.h>
 
 #include <GWCA/Context/PartyContext.h>
 #include <GWCA/Context/CharContext.h>
-#include <GWCA/Context/PreGameContext.h>
 
 #include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/UIMgr.h>
 #include <GWCA/Managers/PlayerMgr.h>
-#include <GWCA/Managers/MemoryMgr.h>
 #include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Managers/GuildMgr.h>
 #include <GWCA/Managers/PartyMgr.h>
@@ -24,9 +23,7 @@
 #include <GWCA/Managers/ItemMgr.h>
 #include <GWCA/Managers/AgentMgr.h>
 
-#include <GWCA/Utilities/Scanner.h>
-#include <GWCA/Utilities/Hooker.h>
-
+#include <Modules/GwDatModule.h>
 #include <Modules/Resources.h>
 #include <Windows/RerollWindow.h>
 #include <Timer.h>
@@ -42,8 +39,10 @@ namespace {
 
     GW::HookEntry ChatCmd_HookEntry;
 
-    bool travel_to_same_location_after_rerolling = true;
-    bool rejoin_party_after_rerolling = true;
+    RerollWindow::Settings settings;
+
+    // GW file 0x5e700: 256x64 sprite sheet with 4x64px icons: none, reforged, dhuum's covenant, melandru's accord
+    IDirect3DTexture9** covenant_sprite = nullptr;
 
     bool check_available_chars = true;
 
@@ -61,7 +60,6 @@ namespace {
     bool same_map = false;
     bool same_party = false;
     const wchar_t* failed_message = nullptr;
-    bool return_on_fail = false;
     bool reverting_reroll = false;
 
     enum RerollStage {
@@ -181,6 +179,23 @@ namespace {
     std::vector<std::wstring> exclude_charnames_from_reroll_cmd;
     char excluded_char_add_buf[20] = {0};
 
+    // Maps account_uuid_str → (profession_id → preferred character name).
+    // An empty profession entry means "no preference" for that profession.
+    std::unordered_map<std::string, std::unordered_map<uint32_t, std::wstring>> preferred_chars_per_account;
+
+    std::string GetCurrentAccountUuidStr()
+    {
+        const auto uuid = GW::AccountMgr::GetAccountUuid();
+        const GUID empty{};
+        if (memcmp(&uuid, &empty, sizeof(uuid)) == 0) return {};
+        return TextUtils::GuidToString(&uuid);
+    }
+
+    std::unordered_map<uint32_t, std::wstring>& GetCurrentAccountPrefs()
+    {
+        return preferred_chars_per_account[GetCurrentAccountUuidStr()];
+    }
+
     GW::HookEntry OnGoToCharSelect_Entry;
 
     bool IsExcludedFromReroll(const wchar_t* player_name)
@@ -215,6 +230,66 @@ namespace {
         }
     }
 
+    void DrawPreferredCharacters()
+    {
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Preferred Characters per Profession");
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::Indent();
+        ImGui::TextDisabled("Choose which character to reroll to for each profession. Leave blank to use the first available character.");
+
+        const auto available_chars_ptr = GW::AccountMgr::GetAvailableChars();
+
+        auto& account_prefs = GetCurrentAccountPrefs();
+        const auto img_w = ImGui::CalcTextSize(" ").y;
+        const ImVec2 img_s = {img_w, img_w};
+        const auto dropdown_w = 200.f * ImGui::FontScale();
+
+        size_t i = 1;
+        for (i = 1; i <= (size_t)GW::Constants::Profession::Dervish; i++) {
+            if ((i % 2) == 0) ImGui::SameLine(0, img_w);
+            const auto prof = static_cast<GW::Constants::Profession>(i);
+            const auto prof_key = static_cast<uint32_t>(prof);
+            auto& pref = account_prefs[prof_key];
+
+            ImGui::PushID(static_cast<int>(i));
+
+            std::vector<const wchar_t*> candidates;
+            if (available_chars_ptr && available_chars_ptr->valid()) {
+                for (const auto& c : *available_chars_ptr) {
+                    if (c.primary() == prof) {
+                        candidates.push_back(c.player_name);
+                    }
+                }
+            }
+
+            ImGui::ImageFit(*Resources::GetProfessionIcon(prof), img_s);
+            ImGui::SameLine();
+
+            const auto current_str = TextUtils::WStringToString(pref);
+            const auto preview = pref.empty() ? "(any)" : current_str.c_str();
+
+            ImGui::SetNextItemWidth(dropdown_w);
+            if (ImGui::BeginCombo("##pref", preview)) {
+                if (ImGui::Selectable("(any)", pref.empty())) {
+                    pref.clear();
+                }
+                for (const auto* cname : candidates) {
+                    const auto cname_str = TextUtils::WStringToString(cname);
+                    const bool selected = !pref.empty() && wcscmp(cname, pref.c_str()) == 0;
+                    if (ImGui::Selectable(cname_str.c_str(), selected)) {
+                        pref = cname;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::PopID();
+        }
+        ImGui::Unindent();
+        ImGui::Spacing();
+    }
+
     bool IsInMap(const bool include_district = true)
     {
         if (guild_hall_uuid) {
@@ -232,17 +307,6 @@ namespace {
         }
     }
 
-    bool IsCharSelectReady()
-    {
-        const GW::PreGameContext* pgc = GW::GetPreGameContext();
-        if (!pgc || !pgc->chars.valid()) {
-            return false;
-        }
-        uint32_t ui_state = 10;
-        SendUIMessage(GW::UI::UIMessage::kCheckUIState, nullptr, &ui_state);
-        return ui_state == 2;
-    }
-
     void RerollFailed(const wchar_t* reason)
     {
         if (reroll_stage < WaitingForCharSelect) {
@@ -254,7 +318,7 @@ namespace {
             return; // Can't do anything.
         }
         failed_message = reason;
-        if (!return_on_fail) {
+        if (!settings.return_on_fail) {
             return;
         }
         reverting_reroll = true;
@@ -265,7 +329,7 @@ namespace {
         reroll_stage = PendingLogout;
     }
 
-    bool Reroll(const wchar_t* character_name, bool _same_map, const bool _same_party = true)
+    bool Reroll(const wchar_t* character_name, bool _same_map, const bool _same_party = true, const bool _ignore_current_character = false, const bool _do_not_prompt = false)
     {
         reroll_stage = None;
         reverting_reroll = false;
@@ -275,7 +339,10 @@ namespace {
         }
         wcscpy(reroll_to_player_name, character_name);
         const wchar_t* player_name = GW::AccountMgr::GetCurrentPlayerName();
-        if (!player_name || wcscmp(player_name, character_name) == 0) {
+        if (!player_name) {
+            return false;
+        }
+        if (!_ignore_current_character && wcscmp(player_name, character_name) == 0) {
             return false;
         }
         wcscpy(initial_player_name, player_name);
@@ -301,7 +368,7 @@ namespace {
         same_map = _same_map;
         same_party = _same_party;
         reroll_timeout = (reroll_stage_set = TIMER_INIT()) + 20000;
-        reroll_stage = PromptPendingLogout;
+        reroll_stage = _do_not_prompt ? PendingLogout : PromptPendingLogout;
         return true;
     }
 
@@ -316,6 +383,62 @@ namespace {
         return true;
     }
 
+    // Finds the best available character for the given profession and initiates a reroll.
+    // Preferred characters (if configured) are tried first, then the first non-excluded match.
+    bool RerollToProfession(const GW::Constants::Profession profession, const bool _same_map, const bool _same_party)
+    {
+        const auto available_characters = GW::AccountMgr::GetAvailableChars();
+        if (!available_characters || !available_characters->valid()) {
+            return false;
+        }
+
+        const auto account_it = preferred_chars_per_account.find(GetCurrentAccountUuidStr());
+        if (account_it != preferred_chars_per_account.end()) {
+            const auto pref_it = account_it->second.find(static_cast<uint32_t>(profession));
+            if (pref_it != account_it->second.end() && !pref_it->second.empty()) {
+                const auto pref_char = GW::AccountMgr::GetAvailableCharacter(pref_it->second.c_str());
+                if (pref_char && pref_char->primary() == profession) {
+                    return Reroll(pref_it->second.c_str(), _same_map, _same_party);
+                }
+            }
+        }
+
+        for (const auto& available_char : *available_characters) {
+            if (IsExcludedFromReroll(available_char.player_name)) {
+                continue;
+            }
+            if (available_char.primary() == profession) {
+                return Reroll(available_char.player_name, _same_map, _same_party);
+            }
+        }
+        return false;
+    }
+
+    // Returns the character name that RerollToProfession would use, or nullptr if none available.
+    const wchar_t* FindAvailableCharForProfession(const GW::Constants::Profession profession)
+    {
+        const auto available_characters = GW::AccountMgr::GetAvailableChars();
+        if (!available_characters || !available_characters->valid()) {
+            return nullptr;
+        }
+        const auto account_it = preferred_chars_per_account.find(GetCurrentAccountUuidStr());
+        if (account_it != preferred_chars_per_account.end()) {
+            const auto pref_it = account_it->second.find(static_cast<uint32_t>(profession));
+            if (pref_it != account_it->second.end() && !pref_it->second.empty()) {
+                const auto pref_char = GW::AccountMgr::GetAvailableCharacter(pref_it->second.c_str());
+                if (pref_char && pref_char->primary() == profession) {
+                    return pref_char->player_name;
+                }
+            }
+        }
+        for (const auto& available_char : *available_characters) {
+            if (available_char.primary() == profession) {
+                return available_char.player_name;
+            }
+        }
+        return nullptr;
+    }
+
     void CHAT_CMD_FUNC(CmdReroll)
     {
         if (argc < 2) {
@@ -327,7 +450,7 @@ namespace {
             Log::Error("Failed to get available characters");
             return;
         }
-        const std::wstring character_or_profession = TextUtils::ToLower(GetRemainingArgsWstr(message, 1));
+        const auto character_or_profession = TextUtils::ToLower(GetRemainingArgsWstr(message, 1));
         constexpr std::array to_find = {
             L"",
             L"warrior",
@@ -342,34 +465,32 @@ namespace {
             L"dervish"
         };
 
-        // Search by profession
-        for (size_t i = 0; i < to_find.size(); i++) {
-            if (!wcsstr(to_find.at(i), character_or_profession.c_str())) {
-                continue;
-            }
-            for (auto& available_char : *available_characters) {
-                if (available_char.primary() != i) {
-                    continue;
+        // Search by profession name → use RerollToProfession (respects preferred chars).
+        for (size_t i = 1; i < to_find.size(); i++) {
+            if (wcsstr(to_find.at(i), character_or_profession.c_str())) {
+                const auto prof = static_cast<GW::Constants::Profession>(i);
+                if (!RerollToProfession(prof, settings.travel_to_same_location_after_rerolling, settings.rejoin_party_after_rerolling)) {
+                    Log::Error("No available character found for that profession");
                 }
-                const auto player_name = available_char.player_name;
-                if (IsExcludedFromReroll(player_name)) {
-                    continue;
-                }
-                Reroll(player_name, travel_to_same_location_after_rerolling, rejoin_party_after_rerolling);
                 return;
             }
         }
 
-        // Search by character name
+        // Search by character name (exact match first, then substring).
+        const wchar_t* substring_match = nullptr;
         for (const auto& available_char : *available_characters) {
             const auto player_name = available_char.player_name;
             if (IsExcludedFromReroll(player_name)) {
                 continue;
             }
-            if (!wcsstr(TextUtils::ToLower(player_name).c_str(), character_or_profession.c_str())) {
-                continue;
+            const auto lower_name = TextUtils::ToLower(player_name);
+            if (!substring_match && wcsstr(lower_name.c_str(), character_or_profession.c_str())) {
+                substring_match = player_name;
+                if (lower_name == character_or_profession) break;
             }
-            Reroll(available_char.player_name, travel_to_same_location_after_rerolling, rejoin_party_after_rerolling);
+        }
+        if (substring_match) {
+            Reroll(substring_match, settings.travel_to_same_location_after_rerolling, settings.rejoin_party_after_rerolling);
             return;
         }
         Log::Error("Failed to match profession or character name for command");
@@ -437,20 +558,23 @@ void RerollWindow::Draw(IDirect3DDevice9*)
     }
     else {
         ImGui::Text("Click on a character name to switch to that character.");
-        ImGui::Checkbox("Travel to same location after rerolling", &travel_to_same_location_after_rerolling);
-        ImGui::Checkbox("Re-join your party after rerolling", &rejoin_party_after_rerolling);
-        ImGui::Checkbox("Return to original character on fail", &return_on_fail);
-        const float btnw = ImGui::GetContentRegionAvail().x / 2.f;
+        ImGui::Checkbox("Travel to same location after rerolling", &settings.travel_to_same_location_after_rerolling);
+        ImGui::Checkbox("Re-join your party after rerolling", &settings.rejoin_party_after_rerolling);
+        ImGui::Checkbox("Return to original character on fail", &settings.return_on_fail);
+        const float btnw = ImGui::GetContentRegionAvail().x / 2.f - ImGui::GetStyle().ItemSpacing.x;
         const ImVec2 btn_dim = {btnw, 0.f};
         std::string buf;
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.f, 0.5f));
         auto available_chars_vector = std::ranges::to<std::vector>(*available_chars_ptr);
         std::ranges::sort(available_chars_vector, [](const auto& a, const auto& b) {
+            if (a.is_pvp() != b.is_pvp()) {
+                return !a.is_pvp();
+            }
             return std::wstring_view(a.player_name) < std::wstring_view(b.player_name);
         });
         for (const auto& [idx, character] : available_chars_vector | std::views::enumerate) {
             const wchar_t* player_name = character.player_name;
-            uint32_t profession = character.primary();
+            const auto profession = character.primary();
             buf = TextUtils::WStringToString(player_name);
             if (idx % 2 != 0) {
                 ImGui::SameLine();
@@ -460,10 +584,10 @@ void RerollWindow::Draw(IDirect3DDevice9*)
                 ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.f));
             }
-            if (ImGui::IconButton(buf.c_str(), *Resources::GetProfessionIcon(static_cast<GW::Constants::Profession>(profession)), btn_dim)) {
-                const bool _same_map = travel_to_same_location_after_rerolling;
-                bool _same_party = travel_to_same_location_after_rerolling && rejoin_party_after_rerolling;
-                if (rejoin_party_after_rerolling && !_same_party) {
+            if (ImGui::IconButton(buf.c_str(), *Resources::GetProfessionIcon(profession), btn_dim)) {
+                const bool _same_map = settings.travel_to_same_location_after_rerolling;
+                bool _same_party = settings.travel_to_same_location_after_rerolling && settings.rejoin_party_after_rerolling;
+                if (settings.rejoin_party_after_rerolling && !_same_party) {
                     const GW::PartyInfo* p = GetPlayerParty();
                     if (p && p->players.size() > 1) {
                         _same_party = true;
@@ -475,6 +599,26 @@ void RerollWindow::Draw(IDirect3DDevice9*)
                 ImGui::PopItemFlag();
                 ImGui::PopStyleColor();
             }
+            if (covenant_sprite && *covenant_sprite) {
+                float uv_x0 = -1.f;
+                if (character.is_melandrus_accord())
+                    uv_x0 = 0.75f;
+                else if (character.is_dhuums_covenant())
+                    uv_x0 = 0.50f;
+                else if (character.is_reforged())         
+                    uv_x0 = 0.25f;
+                if (uv_x0 >= 0.f) {
+                    const ImVec2 item_min = ImGui::GetItemRectMin();
+                    const ImVec2 item_max = ImGui::GetItemRectMax();
+                    const float icon_h = ImGui::GetTextLineHeight();
+                    const float icon_y = item_min.y + (item_max.y - item_min.y - icon_h) * 0.5f;
+                    ImGui::GetWindowDrawList()->AddImage(
+                        reinterpret_cast<ImTextureID>(*covenant_sprite),
+                        {item_max.x - icon_h, icon_y}, {item_max.x, icon_y + icon_h},
+                        {uv_x0, 0.f}, {uv_x0 + 0.25f, 1.f}
+                    );
+                }
+            }
         }
         ImGui::PopStyleVar();
     }
@@ -483,11 +627,20 @@ void RerollWindow::Draw(IDirect3DDevice9*)
     ImGui::End();
 }
 
+void RerollWindow::DrawSettingsInternal()
+{
+    ToolboxWindow::DrawSettingsInternal();
+    DrawPreferredCharacters();
+}
+
 void RerollWindow::Initialize()
 {
     ToolboxWindow::Initialize();
+    SettingsRegistry::Register(this, settings);
 
     reroll_stage = RerollStage::None;
+
+    covenant_sprite = GwDatModule::LoadTextureFromFileId(0x5e700);
 
     // Add an entry to check available characters at login screen
     RegisterUIMessageCallback(&OnGoToCharSelect_Entry, GW::UI::UIMessage::kCheckUIState, OnUIMessage, 0x4000);
@@ -497,6 +650,7 @@ void RerollWindow::Initialize()
 }
 
 void RerollWindow::Terminate() {
+    ToolboxWindow::Terminate();
 
     GW::Chat::DeleteCommand(&ChatCmd_HookEntry);
     GW::UI::RemoveUIMessageCallback(&OnGoToCharSelect_Entry);
@@ -678,42 +832,89 @@ bool RerollWindow::Reroll(const wchar_t* character_name, const GW::Constants::Ma
     return ::Reroll(character_name, _map_id);
 }
 
-bool RerollWindow::Reroll(const wchar_t* character_name, bool _same_map, const bool _same_party)
+bool RerollWindow::Reroll(const wchar_t* character_name, bool _same_map, const bool _same_party, const bool _ignore_current_character, const bool _do_not_prompt)
 {
-    return ::Reroll(character_name, _same_map, _same_party);
+    return ::Reroll(character_name, _same_map, _same_party, _ignore_current_character, _do_not_prompt);
 }
 
-void RerollWindow::LoadSettings(ToolboxIni* ini)
+bool RerollWindow::RerollToProfession(const GW::Constants::Profession profession, const bool _same_map, const bool _same_party)
 {
-    ToolboxWindow::LoadSettings(ini);
-    ToolboxIni::TNamesDepend keys;
-    LOAD_BOOL(travel_to_same_location_after_rerolling);
-    LOAD_BOOL(rejoin_party_after_rerolling);
-    LOAD_BOOL(return_on_fail);
+    return ::RerollToProfession(profession, _same_map, _same_party);
+}
+
+const wchar_t* RerollWindow::FindAvailableCharForProfession(const GW::Constants::Profession profession)
+{
+    return ::FindAvailableCharForProfession(profession);
+}
+
+bool RerollWindow::IsRerolling()
+{
+    return reroll_stage != RerollStage::None;
+}
+
+void RerollWindow::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
+{
+    ToolboxWindow::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
 
     std::vector<std::string> excluded_charnames_strings;
-    GuiUtils::IniToArray(ini->GetValue(Name(), "exclude_charnames_from_reroll_cmd", ""), excluded_charnames_strings, ',');
+    if (!doc.Get(Name(), "exclude_charnames_from_reroll_cmd", excluded_charnames_strings) && legacy) {
+        GuiUtils::IniToArray(legacy->GetValue(Name(), "exclude_charnames_from_reroll_cmd", ""), excluded_charnames_strings, ',');
+    }
     for (auto& cstring : excluded_charnames_strings) {
         auto charname_w = TextUtils::StringToWString(cstring);
         if (charname_w.length() && !IsExcludedFromReroll(charname_w.c_str())) {
             exclude_charnames_from_reroll_cmd.push_back(LowerCaseRemovePunct(charname_w));
         }
     }
+
+    preferred_chars_per_account.clear();
+    std::map<std::string, std::map<uint32_t, std::string>> stored_prefs;
+    if (doc.Get(Name(), "preferred_chars_per_account", stored_prefs)) {
+        for (const auto& [uuid_str, prof_map] : stored_prefs) {
+            for (const auto& [prof, charname] : prof_map) {
+                preferred_chars_per_account[uuid_str][prof] = TextUtils::StringToWString(charname);
+            }
+        }
+    }
+    else if (legacy) {
+        // Legacy per-account preferred characters. Keys are "pref_{uuid}_{n}" (n = 1-10).
+        TNamesDepend keys;
+        legacy->GetAllKeys(Name(), keys);
+        for (const auto& entry : keys) {
+            const std::string_view k = entry.pItem;
+            if (!k.starts_with("pref_") || k.size() < 43) continue;
+            const auto uuid_str = std::string(k.substr(5, 36));
+            if (k.size() <= 42 || k[41] != '_') continue;
+            const auto n_str = k.substr(42);
+            const auto n = static_cast<uint32_t>(std::strtoul(n_str.data(), nullptr, 10));
+            if (n < 1 || n > 10) continue;
+            const char* val = legacy->GetValue(Name(), k.data(), "");
+            if (val && *val) {
+                preferred_chars_per_account[uuid_str][n] = TextUtils::StringToWString(val);
+            }
+        }
+    }
 }
 
-void RerollWindow::SaveSettings(ToolboxIni* ini)
+void RerollWindow::SaveSettings(SettingsDoc& doc)
 {
-    ToolboxWindow::SaveSettings(ini);
-    SAVE_BOOL(travel_to_same_location_after_rerolling);
-    SAVE_BOOL(rejoin_party_after_rerolling);
-    SAVE_BOOL(return_on_fail);
+    ToolboxWindow::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 
-    std::string excluded_charnames_ini = "";
-    for (auto& excluded : exclude_charnames_from_reroll_cmd) {
-        if (excluded_charnames_ini.length()) {
-            excluded_charnames_ini += ',';
-        }
-        excluded_charnames_ini += TextUtils::WStringToString(excluded);
+    std::vector<std::string> excluded_charnames_strings;
+    excluded_charnames_strings.reserve(exclude_charnames_from_reroll_cmd.size());
+    for (const auto& excluded : exclude_charnames_from_reroll_cmd) {
+        excluded_charnames_strings.push_back(TextUtils::WStringToString(excluded));
     }
-    ini->SetValue(Name(), "exclude_charnames_from_reroll_cmd", excluded_charnames_ini.c_str());
+    doc.Set(Name(), "exclude_charnames_from_reroll_cmd", excluded_charnames_strings);
+
+    std::map<std::string, std::map<uint32_t, std::string>> stored_prefs;
+    for (const auto& [uuid_str, prof_map] : preferred_chars_per_account) {
+        for (const auto& [prof, charname] : prof_map) {
+            if (charname.empty()) continue;
+            stored_prefs[uuid_str][prof] = TextUtils::WStringToString(charname);
+        }
+    }
+    doc.Set(Name(), "preferred_chars_per_account", stored_prefs);
 }

@@ -30,6 +30,7 @@
 
 #include <GWToolbox.h>
 #include <Utils/TextUtils.h>
+#include <Utils/ToolboxUtils.h>
 
 // Every connection cost 30 seconds.
 // You have 2 tries.
@@ -37,13 +38,23 @@
 static constexpr uint32_t COST_PER_CONNECTION_MS = 30 * 1000;
 static constexpr uint32_t COST_PER_CONNECTION_MAX_MS = 60 * 1000;
 using easywsclient::WebSocket;
-using nlohmann::json;
-using json_vec = std::vector<json>;
+
+constexpr glz::opts json_opts{.error_on_unknown_keys = false};
+
+namespace lfg_api {
+    struct RawMessage {
+        std::string s; // sender
+        std::string m; // message
+        double t = 0.0; // timestamp ms
+    };
+}
 
 static constexpr char ws_host[] = "wss://lfg.gwtoolbox.com";
 static constexpr char https_host[] = "https://lfg.gwtoolbox.com";
 
 namespace {
+    PartySearchWindow::Settings settings;
+
     wchar_t* GetMessageCore()
     {
         GW::Array<wchar_t>* buff = &GW::GetGameContext()->world->message_buff;
@@ -247,6 +258,7 @@ bool PartySearchWindow::TBParty::FromLocalParty(GW::PartyInfo* party)
 void PartySearchWindow::Initialize()
 {
     ToolboxWindow::Initialize();
+    SettingsRegistry::Register(this, settings);
 
     party_advertisements.reserve(100);
     messages = CircularBuffer<Message>(100);
@@ -263,7 +275,6 @@ void PartySearchWindow::Initialize()
             }
         }
     });
-    // local messages
     GW::StoC::RegisterPostPacketCallback(&OnMessageLocal_Entry, GAME_SMSG_PARTY_SEARCH_REMOVE, OnRegionPartyUpdated);
     GW::StoC::RegisterPostPacketCallback(&OnMessageLocal_Entry, GAME_SMSG_PARTY_SEARCH_SIZE, OnRegionPartyUpdated);
     GW::StoC::RegisterPostPacketCallback(&OnMessageLocal_Entry, GAME_SMSG_PARTY_SEARCH_ADVERTISEMENT, OnRegionPartyUpdated);
@@ -360,7 +371,7 @@ PartySearchWindow::TBParty* PartySearchWindow::GetPartyByName(const std::wstring
 void PartySearchWindow::OnRegionPartyUpdated(GW::HookStatus*, GW::Packet::StoC::PacketBase* packet)
 {
     auto& instance = Instance();
-    const std::lock_guard lock(instance.party_mutex);
+    const std::scoped_lock lock(instance.party_mutex);
 
     // Unless pigs fly and district/party numbers go over 16 byte length, storing party_ids as uint16_t is fine.
     wchar_t* party_name = nullptr;
@@ -512,20 +523,18 @@ void PartySearchWindow::Update(const float)
     }
 }
 
-bool PartySearchWindow::parse_json_message(const json& js, Message* msg)
+bool PartySearchWindow::parse_json_message(const std::string& data, Message* msg)
 {
-    if (js == json::value_t::discarded) {
+    lfg_api::RawMessage raw{};
+    if (auto ec = glz::read<json_opts>(raw, data); ec) {
         return false;
     }
-    if (!(js.contains("s") && js["s"].is_string())
-        || !(js.contains("m") && js["m"].is_string())
-        || !(js.contains("t") && js["t"].is_number_unsigned())) {
+    if (raw.s.empty() || raw.m.empty() || raw.t <= 0.0) {
         return false;
     }
-    msg->name = js["s"].get<std::string>();
-    msg->message = js["m"].get<std::string>();
-    msg->name = js["s"].get<std::string>();
-    msg->timestamp = static_cast<uint32_t>(js["t"].get<uint64_t>() / 1000); // Messy?
+    msg->name = std::move(raw.s);
+    msg->message = std::move(raw.m);
+    msg->timestamp = static_cast<uint32_t>(raw.t / 1000.0); // Messy?
     return true;
 }
 
@@ -536,21 +545,14 @@ void PartySearchWindow::fetch()
     }
 
     ws_window->dispatch([this](const std::string& data) {
-        const json& res = json::parse(data.c_str(), nullptr, false);
-        if (res == json::value_t::discarded) {
-            Log::Log("ERROR: Failed to parse res JSON from response in ws_window->dispatch\n");
-            return;
-        }
-        // Add to message feed
         Message msg;
-        if (!parse_json_message(res, &msg)) {
+        if (!parse_json_message(data, &msg)) {
             return; // Not valid message object
         }
         messages.add(msg);
 
-        // Check alerts
         // do not display trade chat while in kamadan AE district 1
-        const bool print_message = print_game_chat && IsLfpAlert(msg.message);
+        const bool print_message = settings.print_game_chat && IsLfpAlert(msg.message);
 
         if (print_message) {
             wchar_t buffer[512];
@@ -564,28 +566,13 @@ void PartySearchWindow::fetch()
 
 bool PartySearchWindow::IsLfpAlert(std::string& message) const
 {
-    if (!filter_alerts) {
+    if (!settings.filter_alerts) {
         return true;
     }
-    std::regex word_regex;
-    std::smatch m;
-    static const auto regex_check = std::regex("^/(.*)/[a-z]?$", std::regex::ECMAScript | std::regex::icase);
+    // A word wrapped in slashes is a regex, anything else a case-insensitive substring.
     for (const auto& word : alert_words) {
-        if (std::regex_search(word, m, regex_check)) {
-            try {
-                word_regex = std::regex(m._At(1).str(), std::regex::ECMAScript | std::regex::icase);
-            } catch (const std::exception&) {
-                // Silent fail; invalid regex
-            }
-            if (std::regex_search(message, word_regex)) {
-                return true;
-            }
-        }
-        else {
-            auto found = std::ranges::search(message, word, [](const char c1, const char c2) -> bool { return tolower(c1) == c2; }).begin();
-            if (found != message.end()) {
-                return true;
-            }
+        if (word.Matches(message)) {
+            return true;
         }
     }
     return false;
@@ -595,7 +582,7 @@ void PartySearchWindow::Draw(IDirect3DDevice9*)
 {
     /* Alerts window */
     if (show_alert_window) {
-        const float& font_scale = ImGui::GetIO().FontGlobalScale;
+        const float& font_scale = ImGui::FontScale();
         ImGui::SetNextWindowSize(ImVec2(250.f * font_scale, 220.f), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("Trade Alerts", &show_alert_window)) {
             DrawAlertsWindowContent(true);
@@ -614,7 +601,7 @@ void PartySearchWindow::Draw(IDirect3DDevice9*)
         return;
     }
     /* Search bar header */
-    const float& font_scale = ImGui::GetIO().FontGlobalScale;
+    const float& font_scale = ImGui::FontScale();
     const float btn_width = 100.0f * font_scale;
     constexpr bool display_messages = true;
     /* Main trade chat area */
@@ -696,19 +683,18 @@ void PartySearchWindow::Draw(IDirect3DDevice9*)
             char label[64];
             if (party->secondary) {
                 snprintf(label, 64, "%s/%s %s",
-                         GetProfessionAcronym(static_cast<GW::Constants::Profession>(party->primary)),
-                         GetProfessionAcronym(static_cast<GW::Constants::Profession>(party->secondary)),
+                         ToolboxUtils::GetProfessionAcronym(static_cast<GW::Constants::Profession>(party->primary))->string().c_str(),
+                         ToolboxUtils::GetProfessionAcronym(static_cast<GW::Constants::Profession>(party->secondary))->string().c_str(),
                          party->player_name.c_str());
             }
             else {
                 snprintf(label, 64, "%s %s",
-                         GetProfessionAcronym(static_cast<GW::Constants::Profession>(party->primary)),
+                         ToolboxUtils::GetProfessionAcronym(static_cast<GW::Constants::Profession>(party->primary))->string().c_str(),
                          party->player_name.c_str());
             }
 
             if (ImGui::Button(label, ImVec2(playernamewidth, 0))) {
                 std::wstring leader_name = TextUtils::StringToWString(party->player_name);
-                // open whisper to player
                 GW::GameThread::Enqueue([leader_name] {
                     SendUIMessage(GW::UI::UIMessage::kOpenWhisper, (wchar_t*)leader_name.data(), nullptr);
                 });
@@ -750,13 +736,12 @@ void PartySearchWindow::Draw(IDirect3DDevice9*)
 void PartySearchWindow::DrawAlertsWindowContent(bool)
 {
     ImGui::Text("Alerts");
-    ImGui::Checkbox("Send party advertisements to your trade chat", &print_game_chat);
-    ImGui::ShowHelp("Only when trade chat channel is visible in-game");
-    ImGui::Checkbox("Only show messages containing:", &filter_alerts);
+    ImGui::CheckboxWithHelp("Send party advertisements to your trade chat", &settings.print_game_chat, "Only when trade chat channel is visible in-game");
+    ImGui::Checkbox("Only show messages containing:", &settings.filter_alerts);
     ImGui::TextDisabled("(Each line is a separate keyword. Not case sensitive.)");
     if (ImGui::InputTextMultiline("##alertfilter", alert_buf, ALERT_BUF_SIZE,
                                   ImVec2(-1.0f, 0.0f))) {
-        ParseBuffer(alert_buf, alert_words);
+        alert_words = TextUtils::ParsePatterns<char>(alert_buf);
         alertfile_dirty = true;
     }
 }
@@ -766,28 +751,25 @@ void PartySearchWindow::DrawSettingsInternal()
     DrawAlertsWindowContent(false);
 }
 
-void PartySearchWindow::LoadSettings(ToolboxIni* ini)
+void PartySearchWindow::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
-    ToolboxWindow::LoadSettings(ini);
-    LOAD_BOOL(print_game_chat);
-    LOAD_BOOL(filter_alerts);
+    ToolboxWindow::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
 
     std::ifstream alert_file;
-    alert_file.open(Resources::GetSettingFile(L"AlertKeywords.txt"));
+    alert_file.open(Resources::GetSettingFileOrLegacy(L"AlertKeywords.txt"));
     if (alert_file.is_open()) {
         alert_file.get(alert_buf, ALERT_BUF_SIZE, '\0');
         alert_file.close();
-        ParseBuffer(alert_buf, alert_words);
+        alert_words = TextUtils::ParsePatterns<char>(alert_buf);
     }
     alert_file.close();
 }
 
-void PartySearchWindow::SaveSettings(ToolboxIni* ini)
+void PartySearchWindow::SaveSettings(SettingsDoc& doc)
 {
-    ToolboxWindow::SaveSettings(ini);
-
-    SAVE_BOOL(print_game_chat);
-    SAVE_BOOL(filter_alerts);
+    ToolboxWindow::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 
     if (alertfile_dirty || GWToolbox::SettingsFolderChanged()) {
         std::ofstream bycontent_file;
@@ -797,19 +779,6 @@ void PartySearchWindow::SaveSettings(ToolboxIni* ini)
             bycontent_file.close();
             alertfile_dirty = false;
         }
-    }
-}
-
-void PartySearchWindow::ParseBuffer(const char* text, std::vector<std::string>& words)
-{
-    words.clear();
-    std::istringstream stream(text);
-    std::string word;
-    while (std::getline(stream, word)) {
-        for (size_t i = 0; i < word.length(); i++) {
-            word[i] = static_cast<char>(tolower(word[i]));
-        }
-        words.push_back(word);
     }
 }
 

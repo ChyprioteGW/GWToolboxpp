@@ -20,6 +20,10 @@
 #include <GWCA/Managers/GameThreadMgr.h>
 #include <GWCA/Managers/UIMgr.h>
 #include <GWCA/Managers/SkillbarMgr.h>
+#include <GWCA/Managers/FriendListMgr.h>
+#include <GWCA/Managers/PlayerMgr.h>
+
+#include <GWCA/GameEntities/Friendslist.h>
 
 #include <ImGuiAddons.h>
 #include <Logger.h>
@@ -79,11 +83,7 @@ namespace {
         GW::Constants::SkillID skill_id;
     };
 
-    bool custom_sort_party_window = false;
-    bool add_npcs_to_party_window = true; // Quick tickbox to disable the module without restarting TB
-    bool add_player_numbers_to_party_window = false;
-    bool add_elite_skill_to_summons = false;
-    bool remove_dead_imperials = false;
+    PartyWindowModule::Settings settings;
 
     char new_npc_alias[128] = {0};
     int new_npc_model_id = 0;
@@ -100,6 +100,9 @@ namespace {
     GW::HookEntry Summon_AgentAdd_Entry;
     GW::HookEntry Summon_GameThreadCallback_Entry;
 
+    // Names are round-tripped through AgentName packets, so every copy has to fit that field.
+    constexpr size_t agent_enc_name_len = sizeof(GW::Packet::StoC::AgentName::name_enc) / sizeof(wchar_t);
+
     std::vector<uint32_t> allies_added_to_party;
     std::vector<PendingAddToParty> pending_add;
     std::queue<uint32_t> pending_remove;
@@ -110,6 +113,9 @@ namespace {
     std::map<GW::Constants::MapID, std::wstring> map_names_by_id;
 
     bool is_explorable = false;
+
+    clock_t offline_party_search_reminder_last_sent = 0;
+    bool check_party_search_offline_reminder = false;
 
     bool IsPvE()
     {
@@ -173,7 +179,8 @@ namespace {
         GW::Packet::StoC::AgentName packet;
         packet.header = GW::Packet::StoC::AgentName::STATIC_HEADER;
         packet.agent_id = agent_id;
-        wcscpy(packet.name_enc, name);
+        wcsncpy(packet.name_enc, name, _countof(packet.name_enc) - 1);
+        packet.name_enc[_countof(packet.name_enc) - 1] = 0;
         GW::StoC::EmulatePacket(&packet);
         return true;
     }
@@ -233,6 +240,36 @@ namespace {
         user_defined_npcs.clear();
     }
 
+    void LoadDefaults() {
+        ClearSpecialNPCs();
+
+        AddSpecialNPC({"Vale friendly spirit 1", GW::Constants::ModelID::UW::TorturedSpirit1, GW::Constants::MapID::The_Underworld});
+        AddSpecialNPC({"Vale friendly spirit 2", GW::Constants::ModelID::UW::TorturedSpirit1 + 1, GW::Constants::MapID::The_Underworld});
+        AddSpecialNPC({"Pits friendly spirit 1", GW::Constants::ModelID::UW::PitsSoul1, GW::Constants::MapID::The_Underworld});
+        AddSpecialNPC({"Pits friendly spirit 2", GW::Constants::ModelID::UW::PitsSoul2, GW::Constants::MapID::The_Underworld});
+        AddSpecialNPC({"Pits friendly spirit 3", GW::Constants::ModelID::UW::PitsSoul3, GW::Constants::MapID::The_Underworld});
+        AddSpecialNPC({"Pits friendly spirit 4", GW::Constants::ModelID::UW::PitsSoul4, GW::Constants::MapID::The_Underworld});
+
+        AddSpecialNPC({"FoW Griffs", GW::Constants::ModelID::FoW::Griffons, GW::Constants::MapID::The_Fissure_of_Woe});
+        AddSpecialNPC({"FoW Forgemaster", GW::Constants::ModelID::FoW::Forgemaster, GW::Constants::MapID::The_Fissure_of_Woe});
+
+        AddSpecialNPC({"Mursaat Elementalist (Polymock)", GW::Constants::ModelID::PolymockSummon::MursaatElementalist, GW::Constants::MapID::None});
+        AddSpecialNPC({"Flame Djinn (Polymock)", GW::Constants::ModelID::PolymockSummon::FlameDjinn, GW::Constants::MapID::None});
+        AddSpecialNPC({"Ice Imp (Polymock)", GW::Constants::ModelID::PolymockSummon::IceImp, GW::Constants::MapID::None});
+        AddSpecialNPC({"Naga Shaman (Polymock)", GW::Constants::ModelID::PolymockSummon::NagaShaman, GW::Constants::MapID::None});
+
+        AddSpecialNPC({"Ebon Vanguard Assassin", GW::Constants::ModelID::EbonVanguardAssassin, GW::Constants::MapID::None});
+
+        AddSpecialNPC({"Ben Wolfson Pre-Searing", 1512, GW::Constants::MapID::None});
+
+        // Important NPCs for missions
+        AddSpecialNPC({"Gyala Hatchery siege turtle", 3582, GW::Constants::MapID::Gyala_Hatchery_outpost_mission});
+        AddSpecialNPC({"Rornak Stonesledge (Bonus NPC)", 1559, GW::Constants::MapID::The_Frost_Gate});
+        AddSpecialNPC({"Oink (Bonus NPC)", 1710, GW::Constants::MapID::Gates_of_Kryta});
+        AddSpecialNPC({"Restless Spirit (Bonus NPC)", 1965, GW::Constants::MapID::Sanctum_Cay});
+        AddSpecialNPC({"Captain Besuz (Bonus NPC)", 5271, GW::Constants::MapID::Blacktide_Den});
+    }
+
     void ClearAddedAllies()
     {
         for (const auto ally_id : allies_added_to_party) {
@@ -280,7 +317,7 @@ namespace {
         if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Explorable) {
             return;
         }
-        if (!add_npcs_to_party_window) {
+        if (!settings.add_npcs_to_party_window) {
             ClearAddedAllies();
             return;
         }
@@ -344,11 +381,12 @@ namespace {
         packet.agent_id = agent_id;
 
         const auto* a = static_cast<GW::AgentLiving*>(GW::Agents::GetAgentByID(agent_id));
-        wchar_t prev_name[8] = {0};
+        wchar_t prev_name[agent_enc_name_len] = {0};
         if (a) {
-            wcscpy(prev_name, GW::Agents::GetAgentEncName(a));
+            if (const auto* enc_name = GW::Agents::GetAgentEncName(a)) {
+                wcsncpy(prev_name, enc_name, _countof(prev_name) - 1);
+            }
         }
-        // 1. Remove NPC from window.
         GW::StoC::EmulatePacket(&packet);
         SetAgentName(agent_id, prev_name);
         const auto it = std::ranges::find(allies_added_to_party, agent_id);
@@ -366,8 +404,10 @@ namespace {
         if (!a || a->GetIsDead() || a->GetIsDeadByTypeMap()) {
             return;
         }
-        wchar_t prev_name[8] = {0};
-        wcscpy(prev_name, GW::Agents::GetAgentEncName(a));
+        wchar_t prev_name[agent_enc_name_len] = {0};
+        if (const auto* enc_name = GW::Agents::GetAgentEncName(a)) {
+            wcsncpy(prev_name, enc_name, _countof(prev_name) - 1);
+        }
         GW::Packet::StoC::PartyAllyAdd packet;
 
         packet.header = GW::Packet::StoC::PartyAllyAdd::STATIC_HEADER;
@@ -375,7 +415,6 @@ namespace {
         packet.agent_type = p.player_number | 0x20000000;
         packet.allegiance_bits = 1886151033;
 
-        // 1. Remove NPC from window.
         GW::StoC::EmulatePacket(&packet);
         SetAgentName(p.agent_id, prev_name);
 
@@ -427,30 +466,27 @@ namespace {
 
         auto CalcSortPos = [sorting_size](GW::AgentLiving* agent, size_t* sort_pos_out, int* match_quality_out) {
             for (size_t i = 0; i < sorting_size; i++) {
-                uint8_t sorting_primary = chosen_sorting_vector->sorting_by_profession[i] >> 8;
-                uint8_t sorting_secondary = chosen_sorting_vector->sorting_by_profession[i] & 0xff;
+                GW::Constants::ProfessionByte sorting_primary = (GW::Constants::ProfessionByte)(chosen_sorting_vector->sorting_by_profession[i] >> 8);
+                GW::Constants::ProfessionByte sorting_secondary = (GW::Constants::ProfessionByte)(chosen_sorting_vector->sorting_by_profession[i] & 0xff);
 
                 int match_quality = 0;
-                if (sorting_primary != 0 && sorting_primary == agent->primary) {
+                if (sorting_primary != GW::Constants::ProfessionByte::None && sorting_primary == agent->primary) {
                     match_quality++; // Primary match is worth 2 points
                 }
-                if (sorting_secondary != 0 && sorting_secondary == agent->secondary) {
+                if (sorting_secondary != GW::Constants::ProfessionByte::None && sorting_secondary == agent->secondary) {
                     match_quality++; // Secondary match is worth 1 point
                 }
 
-                // Choose this position if it's a better match than what we have
                 if (match_quality > *match_quality_out || (match_quality == *match_quality_out && i < *sort_pos_out)) {
                     *sort_pos_out = i;
                     *match_quality_out = match_quality;
                 }
             }
         };
-        // Find best match for first player
         size_t p1_sort_pos = SIZE_MAX;
         int p1_match_quality = -1; // Higher = better match
         CalcSortPos(p1, &p1_sort_pos, &p1_match_quality);
 
-        // Find best match for second player
         size_t p2_sort_pos = SIZE_MAX;
         int p2_match_quality = -1;
         CalcSortPos(p2, &p2_sort_pos, &p2_match_quality);
@@ -478,20 +514,18 @@ namespace {
 
     const std::string GetProfessionName(uint8_t prof)
     {
-        return GW::Constants::GetProfessionAcronym(static_cast<GW::Constants::Profession>(prof));
+        return ToolboxUtils::GetProfessionAcronym(static_cast<GW::Constants::Profession>(prof))->string();
     }
 
     bool OverridePartySortOrder(bool _override = true)
     {
-        const auto player_list = (GW::ScrollableFrame*)GW::UI::GetChildFrame(SnapsToPartyWindow::GetPartyWindowHealthBars(), 0);
+        const auto player_list = (GW::ItemListFrame*)GW::UI::GetChildFrame(SnapsToPartyWindow::GetPartyWindowHealthBars(), 0);
         if (!player_list) return false;
-        uint32_t count = 0;
-        player_list->GetCount(&count);
         return player_list->SetSortHandler(0) && player_list->SetSortHandler(_override ? PartySortHandler : 0);
     }
     void RefreshPartySortHandler()
     {
-        if (!custom_sort_party_window) {
+        if (!settings.custom_sort_party_window) {
             OverridePartySortOrder(false);
             return;
         }
@@ -517,6 +551,12 @@ namespace {
     {
         if (status->blocked) return;
         switch (message_id) {
+            case GW::UI::UIMessage::kPartySearchCreated:
+            case GW::UI::UIMessage::kPartySearchUpdated: {
+                const auto party_search = *(GW::PartySearch**)wparam;
+                if (party_search && wcseq(GW::PlayerMgr::GetPlayerName(), party_search->party_leader)) 
+                   check_party_search_offline_reminder = true;
+            } break;
             case GW::UI::UIMessage::kSetAgentProfession: {
                 const auto agent_id = *(uint32_t*)wparam;
                 if (GW::PartyMgr::IsAgentInParty(agent_id)) RefreshPartySortHandler();
@@ -536,8 +576,8 @@ namespace {
 
     void DrawCustomNPCSettings() {
         ImGui::TextDisabled("Only works in an explorable area. Only works on NPCs; not enemies, minions or spirits.");
-        const float fontScale = ImGui::GetIO().FontGlobalScale;
-        const float cols[3] = {256.0f * fontScale, 352.0f * fontScale, 448.0f * fontScale};
+        const float font_scale = ImGui::FontScale();
+        const float cols[3] = {256.0f * font_scale, 352.0f * font_scale, 448.0f * font_scale};
 
         ImGui::Text("Name");
         ImGui::SameLine(cols[0]);
@@ -559,7 +599,7 @@ namespace {
             ImGui::Text("%d", npc->model_id);
             ImGui::SameLine(cols[1]);
             ImGui::TextUnformatted(npc->GetMapName());
-            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 48.0f * fontScale);
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 48.0f * font_scale);
             const bool clicked = ImGui::Button(" X ");
             ImGui::PopID();
             if (clicked) {
@@ -596,10 +636,13 @@ namespace {
             Log::Flash("Added special NPC %s (%d)", alias_str.c_str(), new_npc_model_id);
             CheckMap();
         }
+        bool reset = false;
+        if (ImGui::ConfirmButton("Reset", &reset, "This will reset your npc list to the default examples.\nAre you sure you want to continue?")) 
+            LoadDefaults();
     }
 
     void DrawCustomPartySortingSettings() {
-        const float fontScale = ImGui::GetIO().FontGlobalScale;
+        const float fontScale = ImGui::FontScale();
 
         static int edit_sorting_index = -1;
         static int edit_map_id = 0;
@@ -623,7 +666,6 @@ namespace {
             auto& sorting = party_sortings[i];
             ImGui::PushID(static_cast<int>(i));
 
-            // Map name
             const char* map_name = "Any Map";
             if (sorting.map_id != GW::Constants::MapID::None) {
                 auto* enc_name = Resources::GetMapName(sorting.map_id);
@@ -639,7 +681,6 @@ namespace {
             ImGui::TextUnformatted(map_name);
             ImGui::SameLine(sort_cols[0]);
 
-            // Party size
             if (sorting.party_size == 0) {
                 ImGui::Text("Any");
             }
@@ -648,7 +689,6 @@ namespace {
             }
             ImGui::SameLine(sort_cols[1]);
 
-            // Sort order display
             std::string sort_display;
             for (size_t j = 0; j < sorting.sorting_by_profession.size(); j++) {
                 if (j > 0) sort_display += " -> ";
@@ -660,7 +700,6 @@ namespace {
 
             ImGui::SameLine(sort_cols[2]);
 
-            // Edit button
             if (ImGui::Button("Edit")) {
                 edit_sorting_index = i;
                 edit_map_id = static_cast<int>(sorting.map_id);
@@ -669,7 +708,6 @@ namespace {
             }
             ImGui::SameLine();
 
-            // Delete button
             if (ImGui::Button("Delete")) {
                 party_sortings.erase(party_sortings.begin() + i);
                 if (chosen_sorting_vector == &sorting) {
@@ -689,11 +727,9 @@ namespace {
 
 
 
-        // Add/Edit party sorting
         const bool is_editing = (edit_sorting_index >= 0);
         ImGui::Text(is_editing ? "Edit Party Sorting:" : "Add New Party Sorting:");
 
-        // Map selection
         ImGui::Text("Map ID (0 = Any):");
         ImGui::SameLine(200.0f * fontScale);
         ImGui::SetNextItemWidth(100.0f * fontScale);
@@ -702,7 +738,6 @@ namespace {
             ImGui::SameLine();
             ImGui::TextDisabled(Resources::GetMapName((GW::Constants::MapID)edit_map_id)->string().c_str());
         }
-        // Party size
         ImGui::Text("Party Size (0 = Any):");
         ImGui::SameLine(200.0f * fontScale);
         ImGui::SetNextItemWidth(100.0f * fontScale);
@@ -710,7 +745,6 @@ namespace {
         if (edit_party_size < 0) edit_party_size = 0;
         if (edit_party_size > 12) edit_party_size = 12;
 
-        // Profession order
         ImGui::Text("Profession Order:");
         ImGui::BeginChild("profession_order_edit", ImVec2(0, 150.0f), true);
 
@@ -723,11 +757,11 @@ namespace {
             ImGui::Text("%zu.", i + 1);
             ImGui::SameLine();
 
-            // Primary profession combo
             ImGui::SetNextItemWidth(120.0f * fontScale);
-            if (ImGui::BeginCombo("##primary", GW::Constants::GetProfessionAcronym(static_cast<GW::Constants::Profession>(primary)))) {
+            if (ImGui::BeginCombo("##primary", ToolboxUtils::GetProfessionAcronym(static_cast<GW::Constants::Profession>(primary))->string().c_str())) {
                 for (uint8_t prof = 0; prof <= 10; prof++) {
-                    if (ImGui::Selectable(GW::Constants::GetProfessionAcronym(static_cast<GW::Constants::Profession>(prof)), primary == prof)) {
+                    auto id = std::format("{}##prof_{}", ToolboxUtils::GetProfessionAcronym(static_cast<GW::Constants::Profession>(prof))->string(), prof);
+                    if (ImGui::Selectable(id.c_str(), primary == prof)) {
                         primary = prof;
                         edit_profession_order[i] = (static_cast<uint16_t>(primary) << 8) | secondary;
                     }
@@ -739,11 +773,11 @@ namespace {
             ImGui::Text("/");
             ImGui::SameLine();
 
-            // Secondary profession combo
             ImGui::SetNextItemWidth(120.0f * fontScale);
-            if (ImGui::BeginCombo("##secondary", GW::Constants::GetProfessionAcronym(static_cast<GW::Constants::Profession>(secondary)))) {
+            if (ImGui::BeginCombo("##secondary", ToolboxUtils::GetProfessionAcronym(static_cast<GW::Constants::Profession>(secondary))->string().c_str())) {
                 for (uint8_t prof = 0; prof <= 10; prof++) {
-                    if (ImGui::Selectable(GW::Constants::GetProfessionAcronym(static_cast<GW::Constants::Profession>(prof)), secondary == prof)) {
+                    auto id = std::format("{}##prof_{}", ToolboxUtils::GetProfessionAcronym(static_cast<GW::Constants::Profession>(prof))->string(), prof);
+                    if (ImGui::Selectable(id.c_str(), secondary == prof)) {
                         secondary = prof;
                         edit_profession_order[i] = (static_cast<uint16_t>(primary) << 8) | secondary;
                     }
@@ -753,7 +787,6 @@ namespace {
 
             
 
-            // Move up button
             ImGui::SameLine();
             if (ImGui::Button(ICON_FA_ARROW_UP) && i > 0) 
                 std::swap(edit_profession_order[i], edit_profession_order[i - 1]);
@@ -763,7 +796,6 @@ namespace {
                 std::swap(edit_profession_order[i], edit_profession_order[i + 1]);
 
             ImGui::SameLine();
-            // Remove button
             if (ImGui::Button("Remove")) {
                 edit_profession_order.erase(edit_profession_order.begin() + i);
                 ImGui::PopID();
@@ -774,14 +806,12 @@ namespace {
         }
         ImGui::EndChild();
 
-        // Add profession button
         if (ImGui::Button("Add Profession")) {
             edit_profession_order.push_back(0); // Any/Any
         }
 
         ImGui::SameLine();
 
-        // Save button
         if (ImGui::Button(is_editing ? "Save Changes" : "Add Sorting")) {
             if (edit_profession_order.empty()) {
                 Log::Error("At least one profession entry is required");
@@ -802,7 +832,6 @@ namespace {
                     Log::Flash("Added new party sorting");
                 }
 
-                // Clear edit state
                 edit_map_id = 0;
                 edit_party_size = 0;
                 edit_profession_order.clear();
@@ -825,6 +854,13 @@ namespace {
 
 void PartyWindowModule::Update(float delta) {
     ToolboxModule::Update(delta);
+    if (check_party_search_offline_reminder) {
+        check_party_search_offline_reminder = false;
+        if (TIMER_DIFF(offline_party_search_reminder_last_sent) > 10000 && GW::FriendListMgr::GetMyStatus() == GW::FriendStatus::Offline) {
+            offline_party_search_reminder_last_sent = TIMER_INIT();
+            Log::Flash("You're currently offline, and won't receive party search responses.\nType '/online' in chat to set your status to Online.");
+        }
+    }
     while (!summons_pending.empty()) {
         const SummonPending summon = summons_pending.front();
 
@@ -850,11 +886,12 @@ void PartyWindowModule::Update(float delta) {
 void PartyWindowModule::Initialize()
 {
     ToolboxModule::Initialize();
+    SettingsRegistry::Register(this, settings);
     // Remove certain NPCs from party window when dead
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::AgentState>(
         &AgentState_Entry,
         [&](const GW::HookStatus*, const GW::Packet::StoC::AgentState* pak) -> void {
-            if (!add_npcs_to_party_window || pak->state != 16) {
+            if (!settings.add_npcs_to_party_window || pak->state != 16) {
                 return; // Not dead.
             }
             if (!std::ranges::contains(allies_added_to_party, pak->agent_id)) {
@@ -866,7 +903,7 @@ void PartyWindowModule::Initialize()
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::AgentRemove>(
         &AgentRemove_Entry,
         [&](const GW::HookStatus*, const GW::Packet::StoC::AgentRemove* pak) -> void {
-            if (remove_dead_imperials) {
+            if (settings.remove_dead_imperials) {
                 if (const auto* agent = GW::Agents::GetAgentByID(pak->agent_id); agent && agent->GetAsAgentLiving() && agent->GetAsAgentLiving()->GetIsDead()) {
                     const auto player_number = agent->GetAsAgentLiving()->player_number;
                     if (player_number == GW::Constants::ModelID::SummoningStone::ImperialCripplingSlash ||
@@ -890,7 +927,7 @@ void PartyWindowModule::Initialize()
     GW::StoC::RegisterPostPacketCallback<GW::Packet::StoC::AgentAdd>(
         &AgentAdd_Entry,
         [&](const GW::HookStatus*, GW::Packet::StoC::AgentAdd* pak) -> void {
-            if (!add_npcs_to_party_window) {
+            if (!settings.add_npcs_to_party_window) {
                 return;
             }
             if (pak->type != 1) {
@@ -916,7 +953,7 @@ void PartyWindowModule::Initialize()
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::PlayerJoinInstance>(
         &GameSrvTransfer_Entry,
         [&](const GW::HookStatus*, GW::Packet::StoC::PlayerJoinInstance* pak) -> void {
-            if (!add_player_numbers_to_party_window || !is_explorable || IsPvP()) {
+            if (!settings.add_player_numbers_to_party_window || !is_explorable || IsPvP()) {
                 return;
             }
             SetPlayerNumber(pak->player_name, pak->player_number);
@@ -939,7 +976,7 @@ void PartyWindowModule::Initialize()
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::AgentAdd>(
         &Summon_AgentAdd_Entry,
         [&](GW::HookStatus*, const GW::Packet::StoC::AgentAdd* pak) -> void {
-            if (!add_elite_skill_to_summons) {
+            if (!settings.add_elite_skill_to_summons) {
                 return;
             }
             if (pak->type != 1) {
@@ -958,13 +995,15 @@ void PartyWindowModule::Initialize()
     );
 
     const GW::UI::UIMessage ui_messages[] = {
-        GW::UI::UIMessage::kSetAgentProfession, 
-        GW::UI::UIMessage::kPartyRemovePlayer, 
+        GW::UI::UIMessage::kSetAgentProfession,
+        GW::UI::UIMessage::kPartyRemovePlayer,
         GW::UI::UIMessage::kPartyAddPlayer,
-        GW::UI::UIMessage::kMapLoaded
+        GW::UI::UIMessage::kMapLoaded,
+        GW::UI::UIMessage::kPartySearchCreated,
+        GW::UI::UIMessage::kPartySearchUpdated
     };
     for (auto ui_message : ui_messages) {
-        GW::UI::RegisterUIMessageCallback(&OnPostUIMessage_HookEntry, ui_message, OnPostUIMessage, 0x8000);
+        RegisterUIMessageCallback(&OnPostUIMessage_HookEntry, ui_message, OnPostUIMessage, 0x8000);
     }
 }
 
@@ -992,178 +1031,145 @@ bool PartyWindowModule::CanTerminate()
 
 void PartyWindowModule::LoadDefaults()
 {
-    ClearSpecialNPCs();
-
-    AddSpecialNPC({"Vale friendly spirit 1", GW::Constants::ModelID::UW::TorturedSpirit1, GW::Constants::MapID::The_Underworld});
-    AddSpecialNPC({"Vale friendly spirit 2", GW::Constants::ModelID::UW::TorturedSpirit1 + 1, GW::Constants::MapID::The_Underworld});
-    AddSpecialNPC({"Pits friendly spirit 1", GW::Constants::ModelID::UW::PitsSoul1, GW::Constants::MapID::The_Underworld});
-    AddSpecialNPC({"Pits friendly spirit 2", GW::Constants::ModelID::UW::PitsSoul2, GW::Constants::MapID::The_Underworld});
-    AddSpecialNPC({"Pits friendly spirit 3", GW::Constants::ModelID::UW::PitsSoul3, GW::Constants::MapID::The_Underworld});
-    AddSpecialNPC({"Pits friendly spirit 4", GW::Constants::ModelID::UW::PitsSoul4, GW::Constants::MapID::The_Underworld});
-
-    AddSpecialNPC({"FoW Griffs", GW::Constants::ModelID::FoW::Griffons, GW::Constants::MapID::The_Fissure_of_Woe});
-    AddSpecialNPC({"FoW Forgemaster", GW::Constants::ModelID::FoW::Forgemaster, GW::Constants::MapID::The_Fissure_of_Woe});
-
-    AddSpecialNPC({"Mursaat Elementalist (Polymock)", GW::Constants::ModelID::PolymockSummon::MursaatElementalist, GW::Constants::MapID::None});
-    AddSpecialNPC({"Flame Djinn (Polymock)", GW::Constants::ModelID::PolymockSummon::FlameDjinn, GW::Constants::MapID::None});
-    AddSpecialNPC({"Ice Imp (Polymock)", GW::Constants::ModelID::PolymockSummon::IceImp, GW::Constants::MapID::None});
-    AddSpecialNPC({"Naga Shaman (Polymock)", GW::Constants::ModelID::PolymockSummon::NagaShaman, GW::Constants::MapID::None});
-
-    AddSpecialNPC({"Ebon Vanguard Assassin", GW::Constants::ModelID::EbonVanguardAssassin, GW::Constants::MapID::None});
-
-    AddSpecialNPC({"Ben Wolfson Pre-Searing", 1512, GW::Constants::MapID::None});
-
-    // Important NPCs for missions
-    AddSpecialNPC({"Gyala Hatchery siege turtle", 3582, GW::Constants::MapID::Gyala_Hatchery_outpost_mission});
-    AddSpecialNPC({"Rornak Stonesledge (Bonus NPC)", 1559, GW::Constants::MapID::The_Frost_Gate});
-    AddSpecialNPC({"Oink (Bonus NPC)", 1710, GW::Constants::MapID::Gates_of_Kryta});
-    AddSpecialNPC({"Restless Spirit (Bonus NPC)", 1965, GW::Constants::MapID::Sanctum_Cay});
-    AddSpecialNPC({"Captain Besuz (Bonus NPC)", 5271, GW::Constants::MapID::Blacktide_Den});
+    ::LoadDefaults();
 }
 
 void PartyWindowModule::DrawSettingsInternal()
 {
-    ImGui::Checkbox("Add player numbers to party window", &add_player_numbers_to_party_window);
-    ImGui::ShowHelp("Will update on next map");
-    ImGui::Checkbox("Rename Tengu and Imperial Guard Ally summons to their respective elite skill", &add_elite_skill_to_summons);
-    ImGui::ShowHelp("Only works on newly spawned summons.");
+    ImGui::CheckboxWithHelp("Add player numbers to party window", &settings.add_player_numbers_to_party_window, "Will update on next map");
+    ImGui::CheckboxWithHelp("Rename Tengu and Imperial Guard Ally summons to their respective elite skill", &settings.add_elite_skill_to_summons, "Only works on newly spawned summons.");
     ImGui::Checkbox(
-        "Remove dead imperial guard allies", &remove_dead_imperials);
-    if (ImGui::Checkbox("Add special NPCs to party window", &add_npcs_to_party_window)) {
+        "Remove dead imperial guard allies", &settings.remove_dead_imperials);
+    if (ImGui::Checkbox("Add special NPCs to party window", &settings.add_npcs_to_party_window)) {
         CheckMap();
     }
     ImGui::ShowHelp("Adds special NPCs to the Allies section of the party window within compass range.");
-    if (add_npcs_to_party_window) {
+    if (settings.add_npcs_to_party_window) {
         ImGui::Indent();
         DrawCustomNPCSettings();
         ImGui::Unindent();
     }
     ImGui::Separator();
 
-    if (ImGui::Checkbox("Add custom sorting to party window", &custom_sort_party_window)) {
+    if (ImGui::Checkbox("Add custom sorting to party window", &settings.custom_sort_party_window)) {
         RefreshPartySortHandler();
     }
     ImGui::ShowHelp("Automatically sort players in your party window depending on profession and/or map");
-    if (custom_sort_party_window) {
+    if (settings.custom_sort_party_window) {
         ImGui::Indent();
         DrawCustomPartySortingSettings();
         ImGui::Unindent();
     }
 }
-void PartyWindowModule::SaveSettings(ToolboxIni* ini)
+void PartyWindowModule::SaveSettings(SettingsDoc& doc)
 {
-    ToolboxModule::SaveSettings(ini);
-    // Clear existing ini settings
-    ini->Delete(Name(), nullptr, NULL);
+    ToolboxModule::SaveSettings(doc);
+    doc.SetStruct(Name(), settings);
 
-    SAVE_BOOL(add_player_numbers_to_party_window);
-    SAVE_BOOL(add_elite_skill_to_summons);
-    SAVE_BOOL(remove_dead_imperials);
-    SAVE_BOOL(custom_sort_party_window);
-
-    // - Re-fill settings.
-    SAVE_BOOL(add_npcs_to_party_window);
+    std::vector<CustomNPC> stored_npcs;
     for (const auto& user_defined_npc : user_defined_npcs) {
         if (!user_defined_npc || !user_defined_npc->model_id) {
             continue;
         }
-        std::string s(user_defined_npc->alias);
-        s += "\x1";
-        s += std::to_string(std::to_underlying(user_defined_npc->map_id));
-        ini->SetValue(Name(), std::to_string(user_defined_npc->model_id).c_str(), s.c_str());
+        stored_npcs.push_back({user_defined_npc->alias, user_defined_npc->model_id, static_cast<uint32_t>(user_defined_npc->map_id)});
     }
+    doc.Set(Name(), "user_defined_npcs", stored_npcs);
 
-    // Save party sorting configurations
-    ini->SetLongValue(Name(), "party_sorting_count", static_cast<long>(party_sortings.size()));
-    for (size_t i = 0; i < party_sortings.size(); i++) {
-        const auto& sorting = party_sortings[i];
-
-        std::string prefix = "party_sorting_" + std::to_string(i) + "_";
-
-        // Save map ID and party size
-        ini->SetLongValue(Name(), (prefix + "map_id").c_str(), static_cast<long>(sorting.map_id));
-        ini->SetLongValue(Name(), (prefix + "party_size").c_str(), static_cast<long>(sorting.party_size));
-
-        // Save profession order count
-        ini->SetLongValue(Name(), (prefix + "profession_count").c_str(), static_cast<long>(sorting.sorting_by_profession.size()));
-
-        // Save each profession entry
-        for (size_t j = 0; j < sorting.sorting_by_profession.size(); j++) {
-            std::string prof_key = prefix + "profession_" + std::to_string(j);
-            ini->SetLongValue(Name(), prof_key.c_str(), static_cast<long>(sorting.sorting_by_profession[j]));
-        }
+    std::vector<PartySortingSetting> stored_sortings;
+    stored_sortings.reserve(party_sortings.size());
+    for (const auto& [map_id, party_size, by_profession] : party_sortings) {
+        stored_sortings.push_back({static_cast<uint32_t>(map_id), party_size, by_profession});
     }
+    doc.Set(Name(), "party_sortings", stored_sortings);
 }
 
-void PartyWindowModule::LoadSettings(ToolboxIni* ini)
+void PartyWindowModule::LoadSettings(SettingsDoc& doc, ToolboxIni* legacy)
 {
-    ToolboxModule::LoadSettings(ini);
-    // get all keys in a section
-    CSimpleIni::TNamesDepend keys;
-    ini->GetAllKeys(Name(), keys);
-    if (keys.empty()) {
+    ToolboxModule::LoadSettings(doc, legacy);
+    doc.GetStruct(Name(), settings);
+
+    std::vector<CustomNPC> stored_npcs;
+    if (doc.Get(Name(), "user_defined_npcs", stored_npcs)) {
+        ClearSpecialNPCs();
+        for (const auto& npc : stored_npcs) {
+            if (npc.alias.empty() || npc.model_id < 1 || npc.map_id >= static_cast<uint32_t>(GW::Constants::MapID::Count)) {
+                continue;
+            }
+            AddSpecialNPC({npc.alias.c_str(), static_cast<int>(npc.model_id), static_cast<GW::Constants::MapID>(npc.map_id)});
+        }
+    }
+    else if (legacy) {
+        TNamesDepend keys;
+        legacy->GetAllKeys(Name(), keys);
+        if (keys.empty()) {
+            return LoadDefaults();
+        }
+
+        ClearSpecialNPCs();
+        for (const auto& key : keys) {
+            char* p;
+            long model_id = strtol(key.pItem, &p, 10);
+            if (!p || model_id < 1) {
+                continue; // Not a model_id
+            }
+            std::string value(legacy->GetValue(Name(), key.pItem, ""));
+            if (value.empty()) {
+                continue;
+            }
+            const size_t name_end_pos = value.find("\x1");
+            if (name_end_pos == std::string::npos) {
+                continue;
+            }
+            std::string alias(value.substr(0, name_end_pos));
+            if (alias.empty()) {
+                continue;
+            }
+            p = nullptr;
+            long map_id = strtol(value.substr(name_end_pos + 1).c_str(), &p, 10);
+            if (!p || map_id < 0 || map_id >= static_cast<long>(GW::Constants::MapID::Count)) {
+                continue; // Invalid map_id
+            }
+            AddSpecialNPC({alias.c_str(), model_id, static_cast<GW::Constants::MapID>(map_id)});
+        }
+    }
+    else {
         return LoadDefaults();
     }
 
-    LOAD_BOOL(add_npcs_to_party_window);
-    LOAD_BOOL(add_player_numbers_to_party_window);
-    LOAD_BOOL(add_elite_skill_to_summons);
-    LOAD_BOOL(remove_dead_imperials);
-    LOAD_BOOL(custom_sort_party_window);
-
-    ClearSpecialNPCs();
-    for (const auto& key : keys) {
-        char* p;
-        long model_id = strtol(key.pItem, &p, 10);
-        if (!p || model_id < 1) {
-            continue; // Not a model_id
+    std::vector<PartySortingSetting> stored_sortings;
+    if (doc.Get(Name(), "party_sortings", stored_sortings)) {
+        party_sortings.clear();
+        for (auto& stored : stored_sortings) {
+            if (stored.sorting_by_profession.empty()) {
+                continue;
+            }
+            party_sortings.push_back({static_cast<GW::Constants::MapID>(stored.map_id), stored.party_size, std::move(stored.sorting_by_profession)});
         }
-        std::string value(ini->GetValue(Name(), key.pItem, ""));
-        if (value.empty()) {
-            continue;
-        }
-        const size_t name_end_pos = value.find("\x1");
-        if (name_end_pos == std::string::npos) {
-            continue;
-        }
-        std::string alias(value.substr(0, name_end_pos));
-        if (alias.empty()) {
-            continue;
-        }
-        p = nullptr;
-        long map_id = strtol(value.substr(name_end_pos + 1).c_str(), &p, 10);
-        if (!p || map_id < 0 || map_id >= static_cast<long>(GW::Constants::MapID::Count)) {
-            continue; // Invalid map_id
-        }
-        AddSpecialNPC({alias.c_str(), model_id, static_cast<GW::Constants::MapID>(map_id)});
     }
+    else if (legacy) {
+        party_sortings.clear();
+        long sorting_count = legacy->GetLongValue(Name(), "party_sorting_count", 0);
 
-    // Load party sorting configurations
-    party_sortings.clear();
-    long sorting_count = ini->GetLongValue(Name(), "party_sorting_count", 0);
+        for (long i = 0; i < sorting_count; i++) {
+            std::string prefix = "party_sorting_" + std::to_string(i) + "_";
 
-    for (long i = 0; i < sorting_count; i++) {
-        std::string prefix = "party_sorting_" + std::to_string(i) + "_";
+            PartySorting sorting;
 
-        PartySorting sorting;
+            sorting.map_id = static_cast<GW::Constants::MapID>(legacy->GetLongValue(Name(), (prefix + "map_id").c_str(), 0));
+            sorting.party_size = static_cast<uint32_t>(legacy->GetLongValue(Name(), (prefix + "party_size").c_str(), 0));
 
-        // Load map ID and party size
-        sorting.map_id = static_cast<GW::Constants::MapID>(ini->GetLongValue(Name(), (prefix + "map_id").c_str(), 0));
-        sorting.party_size = static_cast<uint32_t>(ini->GetLongValue(Name(), (prefix + "party_size").c_str(), 0));
+            long profession_count = legacy->GetLongValue(Name(), (prefix + "profession_count").c_str(), 0);
+            sorting.sorting_by_profession.reserve(profession_count);
 
-        // Load profession order
-        long profession_count = ini->GetLongValue(Name(), (prefix + "profession_count").c_str(), 0);
-        sorting.sorting_by_profession.reserve(profession_count);
+            for (long j = 0; j < profession_count; j++) {
+                std::string prof_key = prefix + "profession_" + std::to_string(j);
+                uint16_t profession_combo = static_cast<uint16_t>(legacy->GetLongValue(Name(), prof_key.c_str(), 0));
+                sorting.sorting_by_profession.push_back(profession_combo);
+            }
 
-        for (long j = 0; j < profession_count; j++) {
-            std::string prof_key = prefix + "profession_" + std::to_string(j);
-            uint16_t profession_combo = static_cast<uint16_t>(ini->GetLongValue(Name(), prof_key.c_str(), 0));
-            sorting.sorting_by_profession.push_back(profession_combo);
-        }
-
-        // Only add if we have at least one profession entry
-        if (!sorting.sorting_by_profession.empty()) {
-            party_sortings.push_back(sorting);
+            if (!sorting.sorting_by_profession.empty()) {
+                party_sortings.push_back(sorting);
+            }
         }
     }
 

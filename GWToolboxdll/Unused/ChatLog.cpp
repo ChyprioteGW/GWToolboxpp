@@ -15,6 +15,7 @@
 #include <Defines.h>
 #include <GWCA/Managers/GameThreadMgr.h>
 #include <Utils/TextUtils.h>
+#include <Utils/ToolboxUtils.h>
 
 namespace GW::Chat {
     constexpr size_t SENT_LOG_LENGTH = 0x32;
@@ -134,7 +135,6 @@ namespace {
 
     }
 
-    // Check outgoing log to see if message has already been added
     bool IsAdded(wchar_t* _message, uint32_t addr)
     {
         if (!addr) {
@@ -154,7 +154,6 @@ namespace {
         return false;
     }
 
-    // Path to chat log file on disk
     std::filesystem::path LogPath(const wchar_t* prefix)
     {
         wchar_t fn[128];
@@ -163,7 +162,6 @@ namespace {
         return Resources::GetPath(L"chat logs", fn);
     }
 
-    // Remove message from incoming log
     void Remove(const TBChatMessage* message)
     {
         if (message == recv_first) {
@@ -184,7 +182,6 @@ namespace {
         delete message;
     }
     
-    // Add message to incoming log
     void Add(wchar_t* _message, const uint32_t _channel, const FILETIME _timestamp)
     {
         if (injecting || !enabled) {
@@ -196,7 +193,6 @@ namespace {
         const auto new_message = new TBChatMessage(_message, _channel, _timestamp);
         TBChatMessage* inject = recv_last;
         if (!recv_first) {
-            // No first element; log is empty.
             new_message->prev = new_message->next = recv_first = recv_last = new_message;
             goto trim_log;
         }
@@ -205,7 +201,6 @@ namespace {
             switch (CompareFileTime(&inject->timestamp, &_timestamp)) {
             case 0: // Equal; check message cmp
                 if (wcscmp(_message, inject->msg.c_str()) == 0) {
-                    // Duplicate message?
                     return;
                 }
             case 1: // new_message is earlier; keep going back
@@ -247,14 +242,12 @@ namespace {
             Remove(recv_first);
         }
     }
-    // Add message to incoming log
     void Add(GW::Chat::ChatMessage* in)
     {
         Add(in->message, in->channel, in->timestamp);
     }
 
 
-    // Remove message from outgoing log
     void RemoveSent(const TBSentMessage* message)
     {
         if (message == sent_first) {
@@ -275,7 +268,6 @@ namespace {
         delete message;
     }
 
-    // Add message to outgoing log
     void AddSent(wchar_t* _message, const uint32_t addr = 0)
     {
         if (!(IsValidPtr(_message) && _message[0])) {
@@ -288,7 +280,6 @@ namespace {
         const auto new_message = new TBSentMessage(_message, addr);
         TBSentMessage* inject = sent_last;
         if (!sent_first) {
-            // No first element; log is empty.
             new_message->prev = new_message->next = sent_first = sent_last = new_message;
             goto trim_log;
         }
@@ -405,7 +396,7 @@ namespace {
         }
     }
 
-    // Load chat log from file via account email address
+    // Load chat log from file via account UUID string
     void Load(const std::wstring& _account)
     {
         Reset();
@@ -469,11 +460,9 @@ namespace {
             injecting = false;
             return;
         }
-        // Fill chat log
         TBSentMessage* sent = sent_first;
         while (sent) {
             if (sent->msg.data() && sent->msg.length()) {
-                // Only add to log if the message has content
                 AddToSentLog_Func(sent->msg.data());
                 if (!out_log) {
                     out_log = GetSentLog();
@@ -501,7 +490,6 @@ namespace {
             InitChatLog();
 
             auto log = GW::Chat::GetChatLog();
-            // Fill chat log
             size_t log_pos = log ? log->next : 0;
             injecting = true;
 
@@ -536,7 +524,8 @@ namespace {
         if (!c) {
             return false;
         }
-        const std::wstring this_account = c->player_email;
+        const auto uuid = GW::AccountMgr::GetAccountUuid();
+        const auto this_account = TextUtils::StringToWString(TextUtils::GuidToString(&uuid));
         if (this_account == account) {
             return false;
         }
